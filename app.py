@@ -1,92 +1,137 @@
 import streamlit as st
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
+from googleapiclient.http import MediaIoBaseDownload
+from groq import Groq
 import io
+import base64
 
-# --- CONFIGURATION ---
-# We use Streamlit Secrets to avoid hardcoding keys
-# format: st.secrets["gcp_service_account"]
-SCOPES = ['https://www.googleapis.com/auth/drive']
+# --- CONFIG ---
+SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 PARENT_FOLDER_ID = st.secrets["general"]["folder_id"]
 
-def authenticate():
-    """Authenticates using the secrets found in Streamlit Cloud."""
+# --- GOOGLE DRIVE FUNCTIONS ---
+@st.cache_resource
+def get_drive_service():
     creds = service_account.Credentials.from_service_account_info(
         st.secrets["gcp_service_account"], scopes=SCOPES
     )
-    return creds
-
-def upload_file(file_obj, filename):
-    """Uploads a file to the configured Google Drive folder."""
-    creds = authenticate()
-    service = build('drive', 'v3', credentials=creds)
-    
-    file_metadata = {
-        'name': filename,
-        'parents': [PARENT_FOLDER_ID]
-    }
-    
-    media = MediaIoBaseUpload(file_obj, mimetype=file_obj.type, resumable=True)
-    
-    file = service.files().create(
-        body=file_metadata,
-        media_body=media,
-        fields='id'
-    ).execute()
-    
-    return file.get('id')
+    return build('drive', 'v3', credentials=creds)
 
 def list_files():
-    """Lists all images in the specific Drive folder."""
-    creds = authenticate()
-    service = build('drive', 'v3', credentials=creds)
-    
-    # Query: Trash is false, matches parent folder, is an image
+    service = get_drive_service()
     query = f"'{PARENT_FOLDER_ID}' in parents and mimeType contains 'image/' and trashed = false"
-    
     results = service.files().list(
-        q=query, pageSize=20, fields="nextPageToken, files(id, name, webContentLink, thumbnailLink)"
+        q=query, pageSize=50, 
+        fields="files(id, name, thumbnailLink)"
     ).execute()
-    
     return results.get('files', [])
 
+def download_image_bytes(file_id):
+    service = get_drive_service()
+    request = service.files().get_media(fileId=file_id)
+    file_obj = io.BytesIO()
+    downloader = MediaIoBaseDownload(file_obj, request)
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+    return file_obj.getvalue()
+
+# --- GROQ FUNCTIONS ---
+def analyze_with_groq(image_bytes, user_prompt):
+    client = Groq(
+        api_key=st.secrets["groq"]["api_key"],
+    )
+    
+    # Convert image to Base64
+    base64_image = base64.b64encode(image_bytes).decode('utf-8')
+    data_url = f"data:image/jpeg;base64,{base64_image}"
+
+    try:
+        completion = client.chat.completions.create(
+            model="llama-3.2-11b-vision-preview", # Fast and capable vision model
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": user_prompt
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": data_url
+                            }
+                        }
+                    ]
+                }
+            ],
+            temperature=0.5,
+            max_tokens=1024,
+            stream=True,
+            stop=None,
+        )
+        return completion
+    except Exception as e:
+        return f"Error talking to Groq: {str(e)}"
+
 # --- APP LAYOUT ---
-st.set_page_config(page_title="Cloud Vibe Gallery", layout="wide")
-st.title("☁️ Drive-Connected Gallery")
+st.set_page_config(page_title="GroqSpeed Gallery", layout="wide", page_icon="⚡")
 
-# 1. UPLOAD SECTION
-with st.expander("Upload New Photo"):
-    uploaded_file = st.file_uploader("Choose an image", type=['png', 'jpg', 'jpeg'])
-    if uploaded_file is not None:
-        if st.button("Upload to Drive"):
-            with st.spinner("Uploading to Google Drive..."):
-                file_id = upload_file(uploaded_file, uploaded_file.name)
-                st.success("Uploaded! Refresh to see it.")
-                st.balloons()
+# Initialize session state
+if 'selected_image' not in st.session_state:
+    st.session_state.selected_image = None
+if 'selected_image_name' not in st.session_state:
+    st.session_state.selected_image_name = None
 
-# 2. GALLERY SECTION
-st.divider()
-st.subheader("Live Feed")
+st.title("⚡ Groq Vision Gallery")
 
-# Load images (This might be slow if you have 100s of images, pagination helps)
-try:
+# Layout: 40% Gallery | 60% Viewer
+col_gallery, col_viewer = st.columns([2, 3])
+
+with col_gallery:
+    st.subheader("Drive Photos")
     files = list_files()
     
     if not files:
-        st.info("No images found in the Drive folder yet.")
+        st.info("Drive folder is empty.")
     else:
-        # Create grid
-        cols = st.columns(3)
+        # 3-Column Grid for thumbnails
+        grid_cols = st.columns(3)
         for idx, file in enumerate(files):
-            col = cols[idx % 3]
-            with col:
-                # We use thumbnailLink for speed, or webContentLink for quality
-                # Note: 'webContentLink' might force download depending on browser settings.
-                # A trick is to use string replacement to get the viewable link.
-                image_url = file['thumbnailLink'].replace('=s220', '=s1000') # Hack to get higher res
-                
-                st.image(image_url, caption=file['name'], use_container_width=True)
+            with grid_cols[idx % 3]:
+                st.image(file['thumbnailLink'], use_container_width=True)
+                # Unique key for every button is critical
+                if st.button("Pick", key=f"btn_{file['id']}"):
+                    st.session_state.selected_image = file['id']
+                    st.session_state.selected_image_name = file['name']
+                    st.rerun()
 
-except Exception as e:
-    st.error(f"Error connecting to Drive: {e}")
+with col_viewer:
+    if st.session_state.selected_image:
+        st.subheader(f"Analyzing: {st.session_state.selected_image_name}")
+        
+        # 1. Download full resolution
+        with st.spinner("Downloading from Drive..."):
+            img_bytes = download_image_bytes(st.session_state.selected_image)
+            st.image(img_bytes, use_container_width=True)
+            
+        # 2. Chat Interface
+        st.divider()
+        prompt = st.chat_input("Ask Groq about this image...")
+        
+        if prompt:
+            st.markdown(f"**You:** {prompt}")
+            st.markdown("**Groq:**")
+            
+            # Stream the response
+            stream = analyze_with_groq(img_bytes, prompt)
+            
+            if isinstance(stream, str):
+                st.error(stream)
+            else:
+                # Iterate through the stream generator
+                st.write_stream(stream)
+    else:
+        st.info("👈 Select an image from the gallery to start.")
