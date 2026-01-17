@@ -4,3 +4,4 @@ google-auth-httplib2
 google-auth-oauthlib
 groq
 st-click-detector
+edge-tts
