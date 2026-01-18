@@ -1,7 +1,7 @@
 import streamlit as st
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from groq import Groq
 from st_click_detector import click_detector
 import edge_tts
@@ -10,64 +10,100 @@ import io
 import base64
 import random
 import tempfile
+import json
 import os
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Vibe Gallery 🔥", layout="wide", page_icon="💀")
+st.set_page_config(page_title="Roast Gallery 💀", layout="wide", page_icon="💀")
 
-# --- CUSTOM CSS ---
+# --- CUSTOM CSS (THE PINTEREST FIX) ---
 st.markdown("""
 <style>
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
-    .block-container { padding-top: 1rem; padding-bottom: 5rem; }
+    /* Remove default padding for a cleaner app look */
+    .block-container { padding-top: 1rem; padding-bottom: 5rem; max-width: 100%; }
+    header, footer { visibility: hidden; }
     
-    /* Dark Vibe Title */
-    .main-title {
-        text-align: center; font-size: 3.5rem; font-weight: 800;
-        background: linear-gradient(45deg, #ff0000, #2b2b2b, #ff0000);
-        background-size: 200% auto;
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        animation: gradient 3s linear infinite;
-        margin-bottom: 0rem;
+    /* True Masonry Layout using CSS Columns */
+    .masonry-container {
+        column-count: 2;
+        column-gap: 1rem;
     }
-    @keyframes gradient { 0% {background-position: 0% 50%;} 50% {background-position: 100% 50%;} 100% {background-position: 0% 50%;} }
+    @media (min-width: 768px) { .masonry-container { column-count: 3; } }
+    @media (min-width: 1024px) { .masonry-container { column-count: 4; } }
+    @media (min-width: 1280px) { .masonry-container { column-count: 5; } }
     
-    .tagline { text-align: center; color: #888; font-size: 1.1rem; margin-bottom: 2rem; font-style: italic;}
+    /* The Card Styling */
+    .masonry-item {
+        break-inside: avoid;
+        margin-bottom: 1rem;
+        position: relative;
+        border-radius: 16px;
+        overflow: hidden;
+        background: #1e1e1e;
+        transition: transform 0.2s ease, filter 0.2s ease;
+    }
     
-    /* Stats & Leaderboard */
-    .vote-badge { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.8); color: #ff512f; padding: 4px 8px; border-radius: 8px; font-weight: bold; }
+    /* Hover Effects */
+    .masonry-item:hover {
+        transform: translateY(-4px);
+        filter: brightness(1.1);
+        z-index: 10;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    }
+    
+    /* Overlay Text (Hidden by default, shown on hover) */
+    .overlay-content {
+        position: absolute;
+        bottom: 0; left: 0; right: 0;
+        background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
+        padding: 20px 10px 10px 10px;
+        opacity: 0;
+        transition: opacity 0.3s;
+        display: flex;
+        justify-content: space-between;
+        align-items: end;
+    }
+    .masonry-item:hover .overlay-content { opacity: 1; }
+    
+    .roast-btn {
+        background: #ff4b4b; color: white;
+        padding: 5px 12px; border-radius: 20px;
+        font-weight: bold; font-size: 0.8rem;
+    }
+    
+    .vote-pill {
+        background: rgba(255,255,255,0.2);
+        backdrop-filter: blur(4px);
+        padding: 4px 8px; border-radius: 8px;
+        font-size: 0.8rem; font-weight: bold; color: #fff;
+    }
+
+    /* Main Title Styling */
+    .main-title {
+        font-family: 'Inter', sans-serif;
+        font-weight: 900;
+        letter-spacing: -2px;
+        background: -webkit-linear-gradient(0deg, #ff2f2f, #ff8f2f);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-align: center;
+        font-size: 3rem;
+        margin-bottom: 0.5rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # --- CONFIG & SECRETS ---
-SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+SCOPES = ['https://www.googleapis.com/auth/drive']
 PARENT_FOLDER_ID = st.secrets["general"]["folder_id"]
 
-# --- SESSION STATE ---
-if "stats" not in st.session_state:
-    st.session_state.stats = {"roasts": 0, "voice_generations": 0}
+# --- STATE MANAGEMENT ---
 if "image_votes" not in st.session_state:
     st.session_state.image_votes = {} 
 if "roast_mode" not in st.session_state:
-    st.session_state.roast_mode = False
-if "voice_mode" not in st.session_state:
-    st.session_state.voice_mode = False
-if "favorite_images" not in st.session_state:
-    st.session_state.favorite_images = []
+    st.session_state.roast_mode = True # Default to ON because Samay Raina
 if "trigger_dialog_id" not in st.session_state:
     st.session_state.trigger_dialog_id = None
-
-# --- CONSTANTS ---
-VIBE_PROMPTS = {
-    # UPDATED PROMPT FOR SAMAY RAINA STYLE
-    "🔥 Roast": "Roast this image in informal Hindi (mix of Hindi/English). Be sarcastic, dark, and brutal like Samay Raina. Keep it short (2 sentences max). Use words like 'Bhai', 'Ye kya hai', etc. Make fun of the aesthetic.",
-    "😂 Meme": "Create a viral meme caption for this. Short and punchy.",
-    "🕵️ Detective": "Analyze the background details to deduce where this photo was taken.",
-    "🔮 Future": "Predict the future of the person or object in this photo.",
-    "🎵 Song": "What song matches this vibe? Give me artist and title.",
-    "🥒 Pickle": "Describe this image but relate everything to pickles."
-}
 
 # --- BACKEND FUNCTIONS ---
 
@@ -78,9 +114,58 @@ def get_drive_service():
     )
     return build('drive', 'v3', credentials=creds)
 
+# --- GOOGLE DRIVE DATABASE (THE FIX) ---
+def load_votes_db():
+    """Downloads votes.json from Drive to sync votes across users."""
+    service = get_drive_service()
+    # Search for votes.json
+    query = f"'{PARENT_FOLDER_ID}' in parents and name = 'votes.json' and trashed = false"
+    results = service.files().list(q=query, fields="files(id)").execute()
+    files = results.get('files', [])
+    
+    if files:
+        # File exists, download it
+        request = service.files().get_media(fileId=files[0]['id'])
+        file_obj = io.BytesIO()
+        downloader = MediaIoBaseDownload(file_obj, request)
+        done = False
+        while not done: _, done = downloader.next_chunk()
+        try:
+            return json.loads(file_obj.getvalue().decode('utf-8'))
+        except:
+            return {}
+    return {}
+
+def save_votes_db(votes_dict):
+    """Uploads the updated votes dict to Drive."""
+    service = get_drive_service()
+    # Check if exists to update, or create new
+    query = f"'{PARENT_FOLDER_ID}' in parents and name = 'votes.json' and trashed = false"
+    results = service.files().list(q=query, fields="files(id)").execute()
+    files = results.get('files', [])
+    
+    # Convert dict to JSON string stream
+    json_str = json.dumps(votes_dict)
+    media = MediaIoBaseUpload(io.BytesIO(json_str.encode('utf-8')), mimetype='application/json', resumable=True)
+    
+    if files:
+        # Update existing
+        service.files().update(fileId=files[0]['id'], media_body=media).execute()
+    else:
+        # Create new
+        file_metadata = {'name': 'votes.json', 'parents': [PARENT_FOLDER_ID]}
+        service.files().create(body=file_metadata, media_body=media).execute()
+
+# Load DB on startup
+if not st.session_state.image_votes:
+    st.session_state.image_votes = load_votes_db()
+
+
+# --- FILE HANDLING ---
 @st.cache_data(ttl=3600)
 def list_files():
     service = get_drive_service()
+    # List images only, ignore the json file
     query = f"'{PARENT_FOLDER_ID}' in parents and mimeType contains 'image/' and trashed = false"
     results = service.files().list(
         q=query, pageSize=100, fields="files(id, name, thumbnailLink)"
@@ -93,23 +178,23 @@ def download_image_bytes(file_id):
     file_obj = io.BytesIO()
     downloader = MediaIoBaseDownload(file_obj, request)
     done = False
-    while not done:
-        status, done = downloader.next_chunk()
+    while not done: _, done = downloader.next_chunk()
     return file_obj.getvalue()
 
-# --- TTS FUNCTION (UPDATED FOR HINDI) ---
+# --- VOICE & AI ENGINE ---
+
 async def generate_speech_async(text, voice):
-    communicate = edge_tts.Communicate(text, voice)
+    # RATE INCREASED: +20% for that fast comedian pace
+    # PITCH INCREASED: +5Hz for crispness
+    communicate = edge_tts.Communicate(text, voice, rate="+20%", pitch="+5Hz")
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
         await communicate.save(tmp_file.name)
         return tmp_file.name
 
-def text_to_speech(text, is_hindi=False):
-    """Selects the correct voice accent"""
+def text_to_speech(text):
     try:
-        # If roasting (Hindi), use Madhur (Male Hindi). If normal, use Guy (US Male).
-        voice = "hi-IN-MadhurNeural" if is_hindi else "en-US-GuyNeural"
-        
+        # Always Hindi mode for Samay style
+        voice = "hi-IN-MadhurNeural" 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         audio_path = loop.run_until_complete(generate_speech_async(text, voice))
@@ -117,23 +202,21 @@ def text_to_speech(text, is_hindi=False):
     except Exception as e:
         return None
 
-# --- GROQ ANALYSIS (SAMAY RAINA PERSONA) ---
-def analyze_with_groq(image_bytes, user_prompt, chat_history, roast_mode=False):
+def analyze_with_groq(image_bytes, user_prompt, chat_history):
     client = Groq(api_key=st.secrets["groq"]["api_key"])
     base64_image = base64.b64encode(image_bytes).decode('utf-8')
     data_url = f"data:image/jpeg;base64,{base64_image}"
 
-    # Default System Prompt
-    system_content = "You are a helpful, witty AI assistant."
-    
-    # SAMAY RAINA PERSONA INJECTION
-    if roast_mode:
-        system_content = (
-            "You are a savage Indian standup comedian (like Samay Raina style). "
-            "Speak in 'Hinglish' (Hindi written in English script or Devanagari). "
-            "Be dark, sarcastic, deadpan, and brutally honest. "
-            "Do not be polite. Use slang. Keep it short and insulting but funny."
-        )
+    # STRICT SAMAY RAINA PROMPT
+    system_content = (
+        "You are Samay Raina, a savage Indian standup comedian. "
+        "IMPORTANT: Speak ONLY in Hinglish (Hindi words written in English). "
+        "DO NOT use pure English sentences. "
+        "Be brutally honest, dark, deadpan, and sarcastic. "
+        "Roast the person's choices, the aesthetics, or the vibe. "
+        "Use slang like 'Bhai', 'Kya bawasir hai', 'Gajab bejjati hai'. "
+        "Keep it fast, punchy, and under 3 sentences."
+    )
 
     messages = [{"role": "system", "content": system_content}]
     for msg in chat_history:
@@ -151,8 +234,8 @@ def analyze_with_groq(image_bytes, user_prompt, chat_history, roast_mode=False):
         completion = client.chat.completions.create(
             model="meta-llama/llama-4-scout-17b-16e-instruct", 
             messages=messages,
-            temperature=0.8 if roast_mode else 0.6,
-            max_tokens=800,
+            temperature=0.8,
+            max_tokens=600,
             stream=True
         )
         for chunk in completion:
@@ -161,174 +244,153 @@ def analyze_with_groq(image_bytes, user_prompt, chat_history, roast_mode=False):
     except Exception as e:
         yield f"Error: {str(e)}"
 
-# --- UI COMPONENTS ---
+# --- UI LOGIC ---
 
-@st.dialog("✨ Vibe Check Studio", width="large")
+@st.dialog("🎙️ Roast Studio", width="large")
 def show_image_dialog(file_id, file_name):
     if "current_image_id" not in st.session_state or st.session_state.current_image_id != file_id:
         st.session_state.current_image_id = file_id
         st.session_state.chat_history = []
         st.session_state.current_audio_file = None 
 
-    col_img, col_chat = st.columns([1.2, 1])
+    col_img, col_chat = st.columns([1, 1], gap="medium")
     
     with col_img:
-        with st.spinner("Loading pixels..."):
+        with st.spinner("Loading victim..."):
             img_bytes = download_image_bytes(file_id)
             st.image(img_bytes, use_container_width=True)
             
-            # Voting
-            st.markdown("### 🔥 Rate the Burn")
-            vote = st.feedback("stars", key=f"vote_{file_id}")
-            if vote is not None:
-                if file_id not in st.session_state.image_votes:
-                    st.session_state.image_votes[file_id] = 0
-                st.session_state.image_votes[file_id] += (vote + 1)
-                st.caption(f"Score: {st.session_state.image_votes[file_id]}")
+            # --- PERSISTENT VOTING ---
+            st.markdown("### 💀 Rate the Cringe")
+            # Get current votes from DB
+            current_score = st.session_state.image_votes.get(file_id, 0)
+            
+            # Use columns for custom button layout
+            v1, v2 = st.columns(2)
+            if v1.button("🔥 Cringe (+1)", use_container_width=True):
+                st.session_state.image_votes[file_id] = current_score + 1
+                save_votes_db(st.session_state.image_votes) # SAVE TO DRIVE
+                st.rerun()
+                
+            if v2.button("💀 Dead (+5)", use_container_width=True):
+                st.session_state.image_votes[file_id] = current_score + 5
+                save_votes_db(st.session_state.image_votes) # SAVE TO DRIVE
+                st.rerun()
+                
+            st.caption(f"Current Roast Score: **{current_score}**")
 
     with col_chat:
-        # Toggles
-        t1, t2, t3 = st.columns(3)
-        with t1:
-            is_fav = file_id in st.session_state.favorite_images
-            if st.button("💛 Fav" if is_fav else "⭐ Fav"):
-                if is_fav: st.session_state.favorite_images.remove(file_id)
-                else: st.session_state.favorite_images.append(file_id)
-                st.rerun()
-        with t2:
-            st.session_state.roast_mode = st.toggle("💀 Roast", value=st.session_state.roast_mode)
-        with t3:
-            st.session_state.voice_mode = st.toggle("🔊 Voice", value=st.session_state.voice_mode)
-
-        # Quick Prompts
-        st.divider()
-        st.caption("Choose your fate:")
-        q_cols = st.columns(3)
-        selected_prompt = None
-        for idx, (btn_text, prompt_text) in enumerate(VIBE_PROMPTS.items()):
-            with q_cols[idx % 3]:
-                if st.button(btn_text, key=f"quick_{idx}", use_container_width=True):
-                    selected_prompt = prompt_text
-
-        # Chat Area
-        chat_container = st.container(height=350)
-        with chat_container:
-            for msg in st.session_state.chat_history:
-                with st.chat_message(msg["role"]):
-                    st.write(msg["content"])
-
-        user_input = st.chat_input("Type something...")
-        final_prompt = selected_prompt if selected_prompt else user_input
+        st.markdown("#### 💬 Samay's Corner")
         
-        if final_prompt:
-            st.session_state.stats["roasts"] += 1
-            st.session_state.chat_history.append({"role": "user", "content": final_prompt})
-            
-            with chat_container:
-                 with st.chat_message("user"):
-                    st.write(final_prompt)
+        # Default roast trigger
+        if not st.session_state.chat_history:
+             if st.button("🎤 Start Roast (Auto)", type="primary", use_container_width=True):
+                 initial_prompt = "Bhai is photo ko dekh ke roast kar gande wala. Hinglish only."
+                 st.session_state.chat_history.append({"role": "user", "content": initial_prompt})
                  
-                 with st.chat_message("assistant"):
-                    response_gen = analyze_with_groq(
-                        img_bytes, final_prompt, 
-                        st.session_state.chat_history[:-1], 
-                        st.session_state.roast_mode
-                    )
-                    full_response = st.write_stream(response_gen)
-            
-            st.session_state.chat_history.append({"role": "assistant", "content": full_response})
-            
-            # AUDIO GENERATION
-            if st.session_state.voice_mode:
-                with st.spinner("🎙️ Generating Voice..."):
-                    st.session_state.stats["voice_generations"] += 1
-                    # Pass roast_mode to select Hindi voice if needed
-                    audio_file = text_to_speech(full_response, is_hindi=st.session_state.roast_mode)
-                    st.session_state.current_audio_file = audio_file
-                    st.rerun()
+                 # Generate Response
+                 response_text = ""
+                 response_gen = analyze_with_groq(img_bytes, initial_prompt, [])
+                 placeholder = st.empty()
+                 
+                 for chunk in response_gen:
+                     response_text += chunk
+                     placeholder.markdown(f"**Samay:** {response_text}")
+                 
+                 st.session_state.chat_history.append({"role": "assistant", "content": response_text})
+                 
+                 # Auto-play Voice
+                 audio = text_to_speech(response_text)
+                 st.session_state.current_audio_file = audio
+                 st.rerun()
 
+        # Chat History Display
+        for msg in st.session_state.chat_history:
+            if msg['role'] == 'assistant':
+                st.info(f"**Samay:** {msg['content']}")
+            elif msg['role'] == 'user' and "Bhai" not in msg['content']: # Hide system triggers
+                st.write(f"**You:** {msg['content']}")
+        
+        # Audio Player
         if st.session_state.current_audio_file:
             st.audio(st.session_state.current_audio_file, format="audio/mp3", autoplay=True)
+            
+        # Follow up input
+        if prompt := st.chat_input("Reply to Samay..."):
+            st.session_state.chat_history.append({"role": "user", "content": prompt})
+            st.rerun()
 
-def generate_html_grid(files):
+def generate_masonry_grid(files):
     html_blocks = []
-    header = """
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        .masonry-item { break-inside: avoid; margin-bottom: 1.5rem; }
-    </style>
-    <div class="p-2 columns-2 md:columns-3 lg:columns-4 gap-4 mx-auto max-w-7xl">
-    """
-    html_blocks.append(header)
+    
+    # We wrap everything in the 'masonry-container' defined in CSS
+    html_blocks.append('<div class="masonry-container">')
     
     for file in files:
-        thumb_url = file['thumbnailLink'].replace('=s220', '=s600')
+        # High res thumbnail for crispness
+        thumb_url = file['thumbnailLink'].replace('=s220', '=s800')
         votes = st.session_state.image_votes.get(file['id'], 0)
-        vote_html = f'<div class="vote-badge">💀 {votes}</div>' if votes > 0 else ''
         
+        # The Card HTML
         card = f"""
-        <div class="masonry-item relative group rounded-xl overflow-hidden shadow-md hover:shadow-2xl transition-all duration-300">
+        <div class="masonry-item">
             <a href='#' id='{file['id']}'>
-                {vote_html}
-                <img src="{thumb_url}" class="w-full h-auto object-cover transform group-hover:scale-105 transition-transform duration-500" alt="img">
-                <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-                    <span class="text-white font-bold border border-white px-4 py-2 rounded-full">💀 Roast Me</span>
+                <img src="{thumb_url}" style="width:100%; display:block;" alt="img">
+                <div class="overlay-content">
+                    <span class="vote-pill">💀 {votes}</span>
+                    <span class="roast-btn">🎤 Roast Me</span>
                 </div>
             </a>
         </div>
         """
         html_blocks.append(card)
+        
     html_blocks.append("</div>")
     return "".join(html_blocks)
 
-# --- MAIN APP ---
-st.markdown('<h1 class="main-title">Roast Gallery 💀</h1>', unsafe_allow_html=True)
-st.markdown('<p class="tagline">Samay Raina Mode: ON</p>', unsafe_allow_html=True)
+# --- MAIN APP LAYOUT ---
+st.markdown('<div class="main-title">ROAST GALLERY 💀</div>', unsafe_allow_html=True)
 
-tab_gallery, tab_leaderboard = st.tabs(["🖼️ Gallery", "🏆 Hall of Shame"])
+# Tabs
+tab1, tab2 = st.tabs(["🔥 The Feed", "🏆 Hall of Shame"])
 
 try:
     all_files = list_files()
     
-    with tab_gallery:
-        c1, c2, c3 = st.columns([2, 2, 1])
-        with c1:
-            filter_opt = st.selectbox("📂 View", ["All Images", "⭐ Favorites Only", "💀 Most Roasted"], label_visibility="collapsed")
-        with c2:
-            if st.button("🎲 Random Victim", use_container_width=True):
-                if all_files:
-                    rando = random.choice(all_files)
-                    st.session_state.trigger_dialog_id = rando['id']
-                    st.rerun()
-        
-        display_files = all_files
-        if filter_opt == "⭐ Favorites Only":
-            display_files = [f for f in all_files if f['id'] in st.session_state.favorite_images]
-        elif filter_opt == "💀 Most Roasted":
-            display_files = sorted(all_files, key=lambda x: st.session_state.image_votes.get(x['id'], 0), reverse=True)
-
-        if display_files:
-            html = generate_html_grid(display_files)
-            clicked_id = click_detector(html)
+    with tab1:
+        # Pinterest-style Grid
+        if all_files:
+            # Sort by newest (Google Drive default) or randomize
+            random.shuffle(all_files) 
             
-            final_id = clicked_id if clicked_id else st.session_state.trigger_dialog_id
-            if final_id:
-                target = next((f for f in all_files if f['id'] == final_id), None)
+            html_grid = generate_masonry_grid(all_files)
+            clicked_id = click_detector(html_grid)
+            
+            if clicked_id:
+                target = next((f for f in all_files if f['id'] == clicked_id), None)
                 if target:
-                    st.session_state.trigger_dialog_id = None
-                    show_image_dialog(final_id, target['name'])
+                    show_image_dialog(clicked_id, target['name'])
         else:
-            st.info("No victims found.")
+            st.warning("Upload photos to Drive to get started.")
 
-    with tab_leaderboard:
-        st.markdown("### 🏆 Hall of Shame")
+    with tab2:
+        # Leaderboard based on Drive JSON DB
+        st.markdown("### Top Victims")
         if st.session_state.image_votes:
+            # Sort by score
             sorted_votes = sorted(st.session_state.image_votes.items(), key=lambda x: x[1], reverse=True)
-            for file_id, score in sorted_votes[:5]:
-                fname = next((f['name'] for f in all_files if f['id'] == file_id), "Unknown")
-                st.markdown(f"**{fname}** — Roast Score: {score} 💀")
-        else:
-            st.caption("No one has been roasted enough yet.")
+            
+            for rank, (fid, score) in enumerate(sorted_votes[:10]):
+                # Find image object
+                img_obj = next((f for f in all_files if f['id'] == fid), None)
+                if img_obj:
+                    c1, c2 = st.columns([1, 4])
+                    with c1:
+                        st.image(img_obj['thumbnailLink'], width=100)
+                    with c2:
+                        st.markdown(f"**#{rank+1}** | Score: **{score}** 💀")
+                        st.caption(f"ID: {img_obj['name']}")
+                    st.divider()
 
 except Exception as e:
-    st.error(f"App Error: {e}")
+    st.error(f"System Glitch: {e}")
