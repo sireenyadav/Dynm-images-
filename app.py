@@ -70,12 +70,10 @@ body { background-color: #000; color: #fff; font-family: 'Inter', sans-serif; }
 # --- CONFIG & AUTH ---
 
 SCOPES = ['https://www.googleapis.com/auth/drive']
-# Ensure "folder_id" exists in your secrets.toml
 PARENT_FOLDER_ID = st.secrets["general"]["folder_id"]
 
 @st.cache_resource
 def get_drive_service():
-    # Ensure "gcp_service_account" exists in your secrets.toml
     creds = service_account.Credentials.from_service_account_info(
         st.secrets["gcp_service_account"], scopes=SCOPES
     )
@@ -152,7 +150,7 @@ def download_image_bytes(file_id):
         _, done = downloader.next_chunk()
     return file_obj.getvalue()
 
-# --- THE PREDATOR PIPELINE (AI LOGIC) ---
+# --- THE UTKARSH PIPELINE (AI LOGIC) ---
 
 def stage_1_context_builder(client, base64_image):
     """
@@ -161,12 +159,11 @@ def stage_1_context_builder(client, base64_image):
     prompt = """
     Analyze this image for a roast comedian.
     Describe the vibe, objects, pose, setting, and one specific "roastable point".
-
     Return JSON format with keys: vibe, objects, pose, setting, roastable_point.  
     """  
     try:  
         completion = client.chat.completions.create(  
-            model="llama-3.2-90b-vision-preview", # LATEST VISION MODEL  
+            model="llama-3.2-90b-vision-preview",  
             messages=[  
                 {  
                     "role": "user",   
@@ -182,62 +179,70 @@ def stage_1_context_builder(client, base64_image):
         )  
         return json.loads(completion.choices[0].message.content)  
     except Exception as e:  
-        print(f"Vision Error: {e}")  
         return {"vibe": "generic", "roastable_point": "trying too hard"}
 
 def stage_2_dynamic_roast(client, context, level):
     """
-    The Roast Engine using Llama 3.3.
+    The Roast Engine: Utkarsh AI (Extreme Sarcasm).
     """
-    # 5% Chance of Refusal (Unpredictability)
+    # 5% Chance of specific "bored" refusal
     if random.random() < 0.05:
-        return "Yaar mood nahi hai. Yeh photo dekh ke waise hi din kharab ho gaya. Next."
+        return "Bhai rehne de, iski shakal dekh ke mera GPU depress ho gaya. Next."
 
-    # Escalation Logic  
-    styles = {  
-        1: "Light teasing. Point out the obvious.",  
-        2: "Personal attack. Focus on insecurity.",  
-        3: "NUCLEAR. Question their life choices. Brutal."  
-    }  
+    # Escalation Logic
+    styles = {
+        1: "Mild judgment. Pointing out the obvious. 'Bhai kya kar raha hai?' vibe.",
+        2: "Personal attack. Compare them to cheap brands/items. Sarcastic praise.",
+        3: "ABSOLUTE VIOLATION. Question their existence. Street slang. Brutal honesty."
+    }
 
-    # SYSTEM: The Persona  
-    system_prompt = """  
-    You are Samay Raina (Indian Standup Comedian).  
-    1. HINGLISH ONLY (Hindi words in English script).  
-    2. Use slang: "Bhai", "Matlab", "Gajab", "Khatam", "Chomu".  
-    3. No "Hello" or pleasantries. Start attacking immediately.  
-    4. Make it sound like a live stream chat comment.  
-    5. Max 2 short sentences.  
-    """  
-
-    # USER: The Trigger  
-    user_prompt = f"""  
-    Roast this person based on these details:  
-    CONTEXT: {json.dumps(context)}  
-    HEAT LEVEL: {level}/3 ({styles[level]})  
+    # SYSTEM: The Persona (Utkarsh)
+    system_prompt = """
+    You are 'Utkarsh', a brutal, deadpan Indian standup comedian.
     
-    Specifically mention the '{context.get('roastable_point')}' to make it personal.  
-    """  
+    CRITICAL INSTRUCTIONS:
+    1. LANGUAGE: Hinglish (Hindi + English). Use words like: "Bhai", "Matlab", "Scene", "Chomu", "Gareeb", "Bawasir", "Flex", "Chapri".
+    2. TONE: You are NOT angry. You are *bored* and *judgemental*. Like a disappointed senior roasting a junior.
+    3. CONTENT: Focus on their clothes, background, or 'fake aesthetic'.
+    4. NO FILLERS: Don't say "Oh look". Just start the insult.
+    5. LENGTH: Max 2 punchy sentences.
+    
+    EXAMPLES:
+    - "Bhai tune yeh shirt pehni hai ya shirt ne tujhe pehna hai?"
+    - "Isse acchi lighting toh mere fridge ke andar hai."
+    - "Confidence toh Ambani wala hai, par shakal..."
+    """
 
-    try:  
-        completion = client.chat.completions.create(  
-            model="llama-3.3-70b-versatile", # LATEST TEXT MODEL  
-            messages=[  
-                {"role": "system", "content": system_prompt},  
-                {"role": "user", "content": user_prompt}  
-            ],  
-            temperature=0.8 + (level * 0.1),   
-            max_tokens=150  
-        )  
-        return completion.choices[0].message.content  
-    except Exception as e:  
-        return f"Arre server crash ho gaya teri photo dekh ke. (Error: {str(e)})"
+    # USER: The Trigger
+    user_prompt = f"""
+    Roast this specific image context:
+    {json.dumps(context)}
+    
+    HEAT LEVEL: {level}/3 ({styles[level]})
+    
+    TARGET: {context.get('roastable_point', 'their vibe')}
+    
+    Make it sound like a viral comment on a cringe Reel.
+    """
+
+    try:
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.85, 
+            max_tokens=150
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        return f"Server crash ho gaya teri photo dekh ke. (Error: {str(e)})"
 
 async def stage_3_audio_chaos(text):
     """
     Adds stutters, pauses, and speed variations.
     """
-    # Insert Pause
     if "," in text: text = text.replace(",", " ... ")
 
     # Random Stutter  
@@ -248,8 +253,8 @@ async def stage_3_audio_chaos(text):
         text = " ".join(words)  
 
     # Variation  
-    rate = random.choice(["+25%", "+30%", "+35%"])  
-    pitch = random.choice(["-2Hz", "+0Hz", "+2Hz"])  
+    rate = random.choice(["+20%", "+25%", "+30%"])  
+    pitch = random.choice(["-2Hz", "+0Hz"])  
 
     communicate = edge_tts.Communicate(text, "hi-IN-MadhurNeural", rate=rate, pitch=pitch)  
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:  
@@ -257,7 +262,6 @@ async def stage_3_audio_chaos(text):
         return tmp.name
 
 def run_tts(text):
-    # Fix for Event Loop in Streamlit
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     return loop.run_until_complete(stage_3_audio_chaos(text))
@@ -275,14 +279,13 @@ def generate_viral_card(img_bytes, roast_text):
         # Text Setup   
         draw = ImageDraw.Draw(img)  
         
-        # Determine Font (Basic fallback)
+        # Font Fallback
         try:
-            # You might need a .ttf file in your directory for this to work perfectly
             font = ImageFont.truetype("arial.ttf", 40)
         except:
             font = ImageFont.load_default()
 
-        # Simple word wrap logic  
+        # Word wrap logic  
         margin = 40  
         offset = img.height // 2  
         for line in textwrap.wrap(roast_text, width=25):  
@@ -290,25 +293,25 @@ def generate_viral_card(img_bytes, roast_text):
             offset += 50  
 
         # Branding  
-        draw.text((margin, img.height - 80), "💀 VibeGram", fill="#ff0055", font=font)  
+        draw.text((margin, img.height - 80), "💀 Utkarsh AI", fill="#ff0055", font=font)  
 
         output = io.BytesIO()  
         img.convert("RGB").save(output, format="JPEG")  
         return output.getvalue()  
-    except Exception as e: 
-        print(e)
+    except Exception: 
         return None
 
 # --- FAKE COMMENT GENERATOR ---
 
 def get_fake_comments():
-    users = ["tanmaybhat", "suhani.shah", "random_guy_12", "gym_bro_99", "papa_ki_pari"]
+    users = ["carryminati", "random_guy_12", "gym_bro_99", "papa_ki_pari", "backbencher_69"]
     comments = [
         "💀💀💀 bhai saans lene de usko",
         "Emotional damage.",
         "Police ko bulao, murder hua hai",
         "Why is this so accurate though? 😭",
-        "Bro deleted his account after this"
+        "Bro deleted his account after this",
+        "Khatam. Tata. Bye bye."
     ]
     return random.sample(list(zip(users, comments)), 2)
 
@@ -333,7 +336,7 @@ def open_roast_room(file_id, file_name):
             st.rerun()  
 
     with col_int:  
-        st.markdown("### Samay's Corner")  
+        st.markdown("### 💀 Utkarsh's Arena")  
 
         # Heat Level Visualization  
         lvl = st.session_state.current_level  
@@ -349,18 +352,17 @@ def open_roast_room(file_id, file_name):
         btn_text = "🎤 Start Roast" if lvl == 1 else ("🔥 Go Harder" if lvl == 2 else "💀 NUKE THEM")  
 
         if st.button(btn_text, type="primary", use_container_width=True):  
-            # Ensure "groq" exists in secrets.toml
             client = Groq(api_key=st.secrets["groq"]["api_key"])  
             b64_img = base64.b64encode(img_bytes).decode('utf-8')  
 
             # Stage 1: Context (Run once)  
             if file_id not in st.session_state.visual_context:  
-                with st.status("🧠 Analyzing psychology...", expanded=False):  
+                with st.status("🧠 Analyzing insecurities...", expanded=False):  
                     ctx = stage_1_context_builder(client, b64_img)  
                     st.session_state.visual_context[file_id] = ctx  
 
             # Stage 2: Roast  
-            with st.spinner("Writing violation..."):  
+            with st.spinner("Utkarsh is typing..."):  
                 time.sleep(1) # Dramatic pause  
                 roast = stage_2_dynamic_roast(client, st.session_state.visual_context[file_id], lvl)  
                 st.session_state.roast_text = roast  
@@ -380,7 +382,7 @@ def open_roast_room(file_id, file_name):
             st.markdown(f"""  
             <div class="comment-container">  
             <div style="display:flex; align-items:center;">  
-            <span class="samay-handle">samay_raina_ai</span>  
+            <span class="samay-handle">utkarsh_ai</span>  
             <span class="verified-tick">✓</span>  
             </div>  
             <div class="comment-body">{st.session_state.roast_text}</div>  
@@ -408,13 +410,12 @@ def open_roast_room(file_id, file_name):
 def render_feed(files):
     html = ['<div class="masonry-wrapper">']
     for f in files:
-        # Use simple string replacement for thumbnail size if using standard Google drive thumbnails
         thumb = f.get('thumbnailLink', '').replace('=s220', '=s800')
         votes = st.session_state.db["votes"].get(f['id'], 0)
 
         # Calculate Trending  
         is_trending = False  
-        if votes > 5: is_trending = True # Simple threshold for demo logic  
+        if votes > 5: is_trending = True 
 
         badge = '<div class="live-badge" style="position:absolute; top:10px; right:10px;">🔥 TRENDING</div>' if is_trending else ''  
 
@@ -463,7 +464,7 @@ try:
                 st.session_state.current_level = 1  
                 st.session_state.roast_text = None  
                 st.session_state.audio_path = None  
-                st.session_state.visual_context.pop(clicked_id, None) # Clear context to force re-analysis if needed  
+                st.session_state.visual_context.pop(clicked_id, None) 
 
             target = next((f for f in files if f['id'] == clicked_id), None)  
             if target:   
