@@ -3,68 +3,66 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from groq import Groq
-from st_click_detector import click_detector
+from streamlit_autorefresh import st_autorefresh
 import edge_tts
 import asyncio
 import io
 import base64
 import random
-import tempfile
 import json
 import time
-import requests
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from datetime import datetime
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="VibeGram 💀", layout="wide", page_icon="💣")
+# --- PAGE CONFIG (The "Dark Web" Vibe) ---
+st.set_page_config(page_title="VibeGram 💀", layout="wide", page_icon="💣", initial_sidebar_state="expanded")
 
-# --- PRODUCT-GRADE CSS ---
+# --- EXTREME CSS (Glassmorphism + Neon) ---
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;800&family=Inter:wght@400;700&display=swap');
     
-    /* DARK MODE & RESET */
-    .block-container { padding-top: 0.5rem; padding-bottom: 5rem; max-width: 1000px; }
-    header, footer { visibility: hidden; }
-    body { background-color: #000; color: #fff; font-family: 'Inter', sans-serif; }
-
-    /* MASONRY LAYOUT */
-    .masonry-wrapper { column-count: 2; column-gap: 1rem; }
-    @media (min-width: 768px) { .masonry-wrapper { column-count: 3; } }
-
-    /* CARD STYLING */
-    .insta-card {
-        break-inside: avoid;
-        margin-bottom: 1rem;
-        background: #121212;
-        border-radius: 12px;
+    /* GLOBAL RESET */
+    .stApp { background-color: #050505; color: #e0e0e0; font-family: 'Inter', sans-serif; }
+    
+    /* GLASSMORPHISM CARD */
+    .glass-card {
+        background: rgba(20, 20, 20, 0.7);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        padding: 0;
         overflow: hidden;
-        position: relative;
-        border: 1px solid #1f1f1f;
-        transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+        margin-bottom: 20px;
+        transition: transform 0.2s ease;
     }
-    .insta-card:hover { transform: translateY(-4px); border-color: #333; z-index: 10; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    .glass-card:hover { transform: scale(1.01); border-color: rgba(255, 0, 85, 0.5); }
 
-    /* LIVE BADGE */
-    .live-badge {
-        background: #ff0055; color: white;
-        padding: 4px 8px; border-radius: 4px;
-        font-weight: 800; font-size: 0.7rem;
-        text-transform: uppercase; letter-spacing: 1px;
-        animation: pulse-red 2s infinite;
+    /* NEON TEXT */
+    .neon-text {
+        font-family: 'JetBrains Mono', monospace;
+        color: #fff;
+        text-shadow: 0 0 10px rgba(255, 0, 85, 0.8), 0 0 20px rgba(255, 0, 85, 0.4);
     }
-    @keyframes pulse-red { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
 
-    /* COMMENT SECTION UI */
-    .comment-container { background: #0a0a0a; padding: 12px; border-radius: 8px; margin-top: 10px; border-left: 3px solid #333; }
-    .samay-handle { font-weight: 900; color: #fff; margin-right: 5px; font-size: 0.9rem; }
-    .verified-tick { color: #0095f6; font-size: 0.8rem; }
-    .comment-body { color: #e0e0e0; font-size: 0.95rem; line-height: 1.4; margin-top: 2px; }
+    /* CHAT BUBBLES */
+    .chat-bubble {
+        background: #1a1a1a;
+        border-left: 2px solid #333;
+        padding: 8px 12px;
+        margin-bottom: 8px;
+        border-radius: 0 8px 8px 0;
+        font-size: 0.85rem;
+    }
+    .chat-user { color: #ff0055; font-weight: bold; font-size: 0.75rem; margin-bottom: 2px; }
     
-    /* ROAST LEVEL METER */
-    .heat-meter { height: 4px; width: 100%; background: #333; margin-top: 10px; border-radius: 2px; overflow: hidden; }
-    .heat-fill { height: 100%; transition: width 0.5s ease; }
-    
+    /* COMMENT SECTION */
+    .comment-row { display: flex; gap: 10px; margin-bottom: 12px; font-size: 0.9rem; }
+    .comment-user { font-weight: 700; color: #fff; min-width: 80px; }
+    .comment-text { color: #aaa; }
+
+    /* HIDE STREAMLIT JUNK */
+    header, footer { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -79,338 +77,221 @@ def get_drive_service():
     )
     return build('drive', 'v3', credentials=creds)
 
-# --- DATABASE ENGINE (JSON in Drive) ---
-def load_db():
+# --- ENGINE: DRIVE METADATA (The "Hacker" DB) ---
+# We store likes/comments in the file's 'description' field to avoid downloading JSONs.
+
+def get_feed_data():
+    """Fetches feed extremely fast by reading metadata only."""
     service = get_drive_service()
     try:
-        results = service.files().list(q=f"'{PARENT_FOLDER_ID}' in parents and name='vibegram_db.json' and trashed=false", fields="files(id)").execute()
-        files = results.get('files', [])
-        if files:
-            request = service.files().get_media(fileId=files[0]['id'])
-            file_obj = io.BytesIO()
-            downloader = MediaIoBaseDownload(file_obj, request)
-            done = False
-            while not done: _, done = downloader.next_chunk()
-            return json.loads(file_obj.getvalue().decode('utf-8'))
-    except: pass
-    # Default Structure
-    return {"votes": {}, "comments": {}, "roast_history": {}}
+        results = service.files().list(
+            q=f"'{PARENT_FOLDER_ID}' in parents and mimeType contains 'image/' and trashed=false",
+            fields="files(id, name, thumbnailLink, description)", # FETCH METADATA DIRECTLY
+            pageSize=50
+        ).execute()
+        
+        files = []
+        for f in results.get('files', []):
+            # Parse the metadata JSON or create default
+            meta = {}
+            if f.get('description'):
+                try: meta = json.loads(f['description'])
+                except: meta = {"likes": 0, "comments": []}
+            else:
+                meta = {"likes": 0, "comments": []}
+            
+            f['meta'] = meta
+            files.append(f)
+        return files
+    except: return []
 
-def save_db(db):
+def update_file_meta(file_id, meta_dict):
+    """Updates the file metadata instantly."""
     service = get_drive_service()
     try:
-        results = service.files().list(q=f"'{PARENT_FOLDER_ID}' in parents and name='vibegram_db.json' and trashed=false", fields="files(id)").execute()
-        files = results.get('files', [])
-        json_str = json.dumps(db)
-        media = MediaIoBaseUpload(io.BytesIO(json_str.encode('utf-8')), mimetype='application/json', resumable=True)
-        if files: service.files().update(fileId=files[0]['id'], media_body=media).execute()
-        else: service.files().create(body={'name': 'vibegram_db.json', 'parents': [PARENT_FOLDER_ID]}, media_body=media).execute()
+        service.files().update(
+            fileId=file_id, 
+            body={'description': json.dumps(meta_dict)}
+        ).execute()
     except: pass
 
-# --- STATE MANAGEMENT ---
-if "db" not in st.session_state: st.session_state.db = load_db()
-if "visual_context" not in st.session_state: st.session_state.visual_context = {}
-if "current_level" not in st.session_state: st.session_state.current_level = 1
-if "audio_path" not in st.session_state: st.session_state.audio_path = None
-if "roast_text" not in st.session_state: st.session_state.roast_text = None
+# --- ENGINE: GLOBAL CHAT (JSON Append) ---
+CHAT_FILE_NAME = "vibegram_global_chat.json"
 
-# --- CORE FUNCTIONS ---
-
-@st.cache_data(ttl=600)
-def list_files():
+def get_global_chat():
     service = get_drive_service()
-    results = service.files().list(q=f"'{PARENT_FOLDER_ID}' in parents and mimeType contains 'image/' and trashed=false", pageSize=100, fields="files(id, name, thumbnailLink)").execute()
-    return results.get('files', [])
+    try:
+        results = service.files().list(q=f"'{PARENT_FOLDER_ID}' in parents and name='{CHAT_FILE_NAME}'", fields="files(id)").execute()
+        if not results.get('files'): return []
+        
+        file_id = results['files'][0]['id']
+        request = service.files().get_media(fileId=file_id)
+        file_obj = io.BytesIO()
+        downloader = MediaIoBaseDownload(file_obj, request)
+        done = False
+        while not done: _, done = downloader.next_chunk()
+        return json.loads(file_obj.getvalue().decode('utf-8'))
+    except: return []
 
-def download_image_bytes(file_id):
+def send_chat_message(user, msg):
     service = get_drive_service()
-    request = service.files().get_media(fileId=file_id)
-    file_obj = io.BytesIO()
-    downloader = MediaIoBaseDownload(file_obj, request)
-    done = False
-    while not done: _, done = downloader.next_chunk()
-    return file_obj.getvalue()
+    # 1. Get current
+    history = get_global_chat()
+    # 2. Append (Keep last 50)
+    history.append({"u": user, "m": msg, "t": time.time()})
+    if len(history) > 50: history = history[-50:]
+    
+    # 3. Overwrite file
+    results = service.files().list(q=f"'{PARENT_FOLDER_ID}' in parents and name='{CHAT_FILE_NAME}'", fields="files(id)").execute()
+    
+    media = MediaIoBaseUpload(io.BytesIO(json.dumps(history).encode('utf-8')), mimetype='application/json')
+    
+    if results.get('files'):
+        service.files().update(fileId=results['files'][0]['id'], media_body=media).execute()
+    else:
+        service.files().create(body={'name': CHAT_FILE_NAME, 'parents': [PARENT_FOLDER_ID]}, media_body=media).execute()
 
-# --- THE PREDATOR PIPELINE ---
-
-def stage_1_context_builder(client, base64_image):
-    """
-    The Silent Observer. Extracts signals, doesn't roast.
-    """
-    prompt = """
-    Analyze this image for a roast comedian. 
-    OUTPUT JSON ONLY:
-    {
-        "vibe": "tryhard/rich kid/struggling/messy",
-        "objects": ["dirty mirror", "fake watch", "weird poster"],
-        "pose": "awkward/confident/forced",
-        "setting": "bathroom/gym/mom's basement",
-        "roastable_point": "The specific thing most embarrassing about this image"
-    }
+# --- ENGINE: TOXIC ROAST & AUDIO ---
+def generate_toxic_comments(client, image_desc):
+    """Generates 3 REALISTIC hateful comments based on image context."""
+    prompt = f"""
+    Context: An image of {image_desc}.
+    Task: Write 3 comments from internet trolls.
+    Style: Hinglish, Gen-Z slang, Brutally honest, No punctuation.
+    Users: 'dank_rishu', 'papa_ki_pari', 'gym_rat_99'
+    Format: JSON array of objects {{'user': '...', 'text': '...'}}
     """
     try:
         completion = client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}]}],
-            temperature=0.5, max_tokens=200, response_format={"type": "json_object"}
+            model="meta-llama/llama-3.2-11b-vision-instruct", # Using a smaller, faster model
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"}
         )
-        return json.loads(completion.choices[0].message.content)
+        return json.loads(completion.choices[0].message.content)['comments']
     except:
-        return {"vibe": "generic", "roastable_point": "existence"}
+        return [{"user": "unknown", "text": "bruh what is this"}]
 
-def stage_2_dynamic_roast(client, context, level):
-    """
-    The Roast Engine.
-    """
-    # 5% Chance of Refusal (Unpredictability)
-    if random.random() < 0.05:
-        return "Yaar mood nahi hai. Yeh photo dekh ke waise hi din kharab ho gaya. Next."
+async def get_audio_stream(text):
+    communicate = edge_tts.Communicate(text, "hi-IN-MadhurNeural", rate="+10%")
+    with io.BytesIO() as f:
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                f.write(chunk["data"])
+        return f.getvalue()
 
-    # Escalation Logic
-    styles = {
-        1: "Light teasing. Point out the obvious.",
-        2: "Personal attack. Focus on insecurity.",
-        3: "NUCLEAR. Question their life choices. Brutal."
-    }
-    
-    prompt = f"""
-    You are Samay Raina.
-    CONTEXT: {json.dumps(context)}
-    HEAT LEVEL: {level}/3 ({styles[level]})
-    
-    RULES:
-    1. HINGLISH ONLY. (Hindi in English script).
-    2. Use slang: "Bhai", "Matlab", "Gajab", "Khatam".
-    3. No "Hello". Start attacking.
-    4. Make it sound like a live stream comment.
-    5. Mention the '{context.get('roastable_point')}' specifically.
-    6. Max 2 short sentences.
-    """
-    
-    completion = client.chat.completions.create(
-        model="meta-llama/llama-4-scout-17b-16e-instruct",
-        messages=[{"role": "system", "content": prompt}],
-        temperature=0.8 + (level * 0.1), max_tokens=150
-    )
-    return completion.choices[0].message.content
+# --- UI COMPONENTS ---
 
-async def stage_3_audio_chaos(text):
-    """
-    Adds stutters, pauses, and speed variations.
-    """
-    # Insert Pause
-    if "," in text: text = text.replace(",", " ... ")
-    
-    # Random Stutter
-    words = text.split()
-    if len(words) > 5 and random.random() < 0.3:
-        idx = random.randint(0, len(words)-3)
-        words[idx] = words[idx][0] + "-" + words[idx]
-        text = " ".join(words)
-
-    # Variation
-    rate = random.choice(["+25%", "+30%", "+35%"])
-    pitch = random.choice(["-2Hz", "+0Hz", "+2Hz"])
-    
-    communicate = edge_tts.Communicate(text, "hi-IN-MadhurNeural", rate=rate, pitch=pitch)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
-        await communicate.save(tmp.name)
-        return tmp.name
-
-def run_tts(text):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    return loop.run_until_complete(stage_3_audio_chaos(text))
-
-# --- VIRAL CARD GENERATOR ---
-def generate_viral_card(img_bytes, roast_text):
-    try:
-        img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
+def render_sidebar():
+    with st.sidebar:
+        st.markdown("<h2 class='neon-text'>🔴 LIVE GLOBAL</h2>", unsafe_allow_html=True)
         
-        # Dark Overlay
-        overlay = Image.new('RGBA', img.size, (0, 0, 0, 150))
-        img = Image.alpha_composite(img, overlay)
+        # Fake Online Counter (Fluctuates)
+        online = 1200 + int(time.time() % 100)
+        st.caption(f"🟢 {online} users online now")
         
-        # Text Setup (Fallback to basic font if TTF fails, but try to load default)
-        draw = ImageDraw.Draw(img)
+        # Global Chat
+        st_autorefresh(interval=5000, key="chat_refresh") # Auto-refresh every 5s
         
-        # Simple word wrap logic
-        margin = 40
-        offset = img.height // 2
-        for line in textwrap.wrap(roast_text, width=25):
-            draw.text((margin, offset), line, fill="white", font_size=40)
-            offset += 50
-            
-        # Branding
-        draw.text((margin, img.height - 80), "💀 VibeGram", fill="#ff0055", font_size=30)
+        chat_container = st.container(height=400)
+        history = get_global_chat()
         
-        output = io.BytesIO()
-        img.convert("RGB").save(output, format="JPEG")
-        return output.getvalue()
-    except: return None
-    
-import textwrap
+        with chat_container:
+            for c in reversed(history): # Show newest first
+                st.markdown(f"""
+                <div class="chat-bubble">
+                    <div class="chat-user">{c['u']}</div>
+                    <div>{c['m']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        # Chat Input
+        with st.form("chat_form", clear_on_submit=True):
+            user_msg = st.text_input("Say something toxic...", placeholder="Type here...")
+            if st.form_submit_button("Send 🚀"):
+                if user_msg:
+                    send_chat_message("You", user_msg)
+                    st.rerun()
 
-# --- FAKE COMMENT GENERATOR ---
-def get_fake_comments():
-    users = ["tanmaybhat", "suhani.shah", "random_guy_12", "gym_bro_99", "papa_ki_pari"]
-    comments = [
-        "💀💀💀 bhai saans lene de usko",
-        "Emotional damage.",
-        "Police ko bulao, murder hua hai",
-        "Why is this so accurate though? 😭",
-        "Bro deleted his account after this"
-    ]
-    return random.sample(list(zip(users, comments)), 2)
-
-# --- UI CONTROLLER ---
-@st.dialog("💀 The Roast Room", width="large")
-def open_roast_room(file_id, file_name):
-    # Load State
-    votes = st.session_state.db["votes"].get(file_id, 0)
+def render_feed_card(file_data, client):
+    f_id = file_data['id']
+    meta = file_data.get('meta', {})
+    likes = meta.get('likes', 0)
+    comments = meta.get('comments', [])
     
-    col_vis, col_int = st.columns([1.2, 1], gap="medium")
+    col1, col2 = st.columns([1.5, 1])
     
-    with col_vis:
-        with st.spinner("Analyzing visuals..."):
-            img_bytes = download_image_bytes(file_id)
-            st.image(img_bytes, use_container_width=True)
-            
-            # Like Animation Button
-            if st.button(f"❤️ Like ({votes})", use_container_width=True):
-                st.session_state.db["votes"][file_id] = votes + 1
-                save_db(st.session_state.db)
-                st.rerun()
-
-    with col_int:
-        st.markdown("### Samay's Corner")
-        
-        # Heat Level Visualization
-        lvl = st.session_state.current_level
-        colors = {1: "#ffd700", 2: "#ff8c00", 3: "#ff0000"}
+    with col1:
+        # The Image Card
         st.markdown(f"""
-        <div class="heat-meter">
-            <div class="heat-fill" style="width: {lvl*33}%; background: {colors[lvl]};"></div>
+        <div class="glass-card">
+            <img src="{file_data['thumbnailLink'].replace('=s220', '=s800')}" style="width:100%; display:block;">
         </div>
-        <div style="text-align:right; font-size:0.8rem; color:{colors[lvl]}; font-weight:bold;">HEAT LEVEL {lvl}</div>
         """, unsafe_allow_html=True)
+    
+    with col2:
+        # The Interaction Panel
+        st.markdown(f"<h3 style='margin:0;'>{file_data['name']}</h3>", unsafe_allow_html=True)
         
-        # Action Button
-        btn_text = "🎤 Start Roast" if lvl == 1 else ("🔥 Go Harder" if lvl == 2 else "💀 NUKE THEM")
-        
-        if st.button(btn_text, type="primary", use_container_width=True):
-            client = Groq(api_key=st.secrets["groq"]["api_key"])
-            b64_img = base64.b64encode(img_bytes).decode('utf-8')
-            
-            # Stage 1: Context (Run once)
-            if file_id not in st.session_state.visual_context:
-                with st.status("🧠 Analyzing psychology...", expanded=False):
-                    ctx = stage_1_context_builder(client, b64_img)
-                    st.session_state.visual_context[file_id] = ctx
-            
-            # Stage 2: Roast
-            with st.spinner("Writing violation..."):
-                time.sleep(1) # Dramatic pause
-                roast = stage_2_dynamic_roast(client, st.session_state.visual_context[file_id], lvl)
-                st.session_state.roast_text = roast
-                
-                # Stage 3: Audio
-                st.session_state.audio_path = run_tts(roast)
-                
-                # Increment Level
-                st.session_state.current_level = min(lvl + 1, 3)
-                st.rerun()
+        # Like Button (Stateful)
+        if st.button(f"❤️ {likes}", key=f"like_{f_id}", use_container_width=True):
+            meta['likes'] = likes + 1
+            update_file_meta(f_id, meta)
+            st.rerun()
 
         st.divider()
         
-        # RESULT DISPLAY
-        if st.session_state.roast_text:
-            # Main Roast Comment
-            st.markdown(f"""
-            <div class="comment-container">
-                <div style="display:flex; align-items:center;">
-                    <span class="samay-handle">samay_raina_ai</span>
-                    <span class="verified-tick">✓</span>
+        # REAL Comments Section
+        if not comments:
+            if st.button("🔥 Analyze & Roast", key=f"roast_{f_id}", type="primary", use_container_width=True):
+                with st.spinner("Summoning trolls..."):
+                    # 1. Download image for analysis
+                    # (In production, send URL if public, but here we mock the desc for speed)
+                    desc = "a cringy selfie in a dirty mirror" 
+                    
+                    # 2. Generate Toxic Comments
+                    new_comments = generate_toxic_comments(client, desc)
+                    
+                    # 3. Save to Metadata
+                    meta['comments'] = new_comments
+                    update_file_meta(f_id, meta)
+                    st.rerun()
+        else:
+            st.markdown("<b>Top Comments</b>", unsafe_allow_html=True)
+            for c in comments:
+                st.markdown(f"""
+                <div class="comment-row">
+                    <div class="comment-user">{c['user']}</div>
+                    <div class="comment-text">{c['text']}</div>
                 </div>
-                <div class="comment-body">{st.session_state.roast_text}</div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            if st.session_state.audio_path:
-                st.audio(st.session_state.audio_path, format="audio/mp3", autoplay=True)
-            
-            # Fake Comments (Social Proof)
-            st.markdown("<br><b>Comments</b>", unsafe_allow_html=True)
-            for user, txt in get_fake_comments():
-                st.markdown(f"<div style='font-size:0.85rem; margin-bottom:5px;'><b>{user}</b>: {txt}</div>", unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
+                
+            # Reply Input (Real-time feel)
+            reply = st.text_input("Reply...", key=f"reply_{f_id}", label_visibility="collapsed")
+            if reply:
+                meta['comments'].append({"user": "You", "text": reply})
+                update_file_meta(f_id, meta)
+                st.rerun()
 
-            # Share Button
-            st.divider()
-            if st.button("📤 Generate Viral Card", use_container_width=True):
-                card_bytes = generate_viral_card(img_bytes, st.session_state.roast_text)
-                if card_bytes:
-                    st.download_button("Download for Story", card_bytes, "story.jpg", "image/jpeg", use_container_width=True)
-
-# --- FEED RENDERER ---
-def render_feed(files):
-    html = ['<div class="masonry-wrapper">']
-    for f in files:
-        thumb = f['thumbnailLink'].replace('=s220', '=s800')
-        votes = st.session_state.db["votes"].get(f['id'], 0)
-        
-        # Calculate Trending
-        is_trending = False
-        if votes > 5: is_trending = True # Simple threshold for demo logic
-        
-        badge = '<div class="live-badge" style="position:absolute; top:10px; right:10px;">🔥 TRENDING</div>' if is_trending else ''
-        
-        card = f"""
-        <div class="insta-card">
-            <a href='#' id='{f['id']}' style="text-decoration:none; color:inherit;">
-                {badge}
-                <img src="{thumb}" style="width:100%; display:block;">
-                <div style="padding:10px; display:flex; justify-content:space-between; align-items:center;">
-                    <div style="font-weight:bold; font-size:0.9rem;">❤️ {votes}</div>
-                    <div style="font-size:0.8rem; opacity:0.7;">Tap to Roast</div>
-                </div>
-            </a>
-        </div>
-        """
-        html.append(card)
-    html.append('</div>')
-    return "".join(html)
-
-# --- MAIN EXECUTION ---
-# Live Activity Header
-online_users = random.randint(800, 1500)
-st.markdown(f"""
-<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; padding:10px; background:#111; border-radius:8px;">
-    <div style="font-weight:900; font-size:1.5rem;">VibeGram</div>
-    <div style="color:#00ff00; font-size:0.8rem;">● {online_users} Online</div>
-</div>
-""", unsafe_allow_html=True)
-
-try:
-    files = list_files()
+# --- MAIN APP ---
+def main():
+    client = Groq(api_key=st.secrets["groq"]["api_key"])
+    
+    render_sidebar()
+    
+    st.markdown("<h1 style='text-align:center; margin-bottom:40px;'>💀 VIBEGRAM <span style='color:#ff0055'>DARK</span></h1>", unsafe_allow_html=True)
+    
+    # Load Feed (Fast Metadata)
+    files = get_feed_data()
+    
+    # Sort by Likes (Trending Algorithm)
+    files.sort(key=lambda x: x.get('meta', {}).get('likes', 0), reverse=True)
+    
     if not files:
-        st.info("Feed empty.")
+        st.warning("Feed is empty. Upload photos to Drive folder.")
     else:
-        # Sort by votes
-        files.sort(key=lambda x: st.session_state.db["votes"].get(x['id'], 0), reverse=True)
-        
-        grid_html = render_feed(files)
-        clicked_id = click_detector(grid_html)
-        
-        if clicked_id:
-            # Reset Roast State on New Click
-            if "current_view_id" not in st.session_state or st.session_state.current_view_id != clicked_id:
-                st.session_state.current_view_id = clicked_id
-                st.session_state.current_level = 1
-                st.session_state.roast_text = None
-                st.session_state.audio_path = None
-            
-            target = next((f for f in files if f['id'] == clicked_id), None)
-            if target: open_roast_room(clicked_id, target['name'])
+        for f in files:
+            render_feed_card(f, client)
+            st.markdown("<br>", unsafe_allow_html=True)
 
-except Exception as e:
-    st.error(f"Error: {e}")
+if __name__ == "__main__":
+    main()
