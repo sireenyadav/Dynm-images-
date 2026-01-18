@@ -26,67 +26,73 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- PREMIUM CSS ARCHITECTURE ---
+# --- CSS ARCHITECTURE (FIXED FOR MOBILE) ---
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&display=swap');
 
-/* RESET & BASICS */
-.block-container { padding-top: 1rem; padding-bottom: 5rem; max-width: 900px; }
+/* GLOBAL RESET */
+.block-container { padding-top: 0.5rem; padding-bottom: 5rem; max-width: 900px; }
 body { background-color: #000; color: #fff; font-family: 'Inter', sans-serif; }
 a { text-decoration: none !important; }
 
-/* FEED GRID */
-.masonry-wrapper { column-count: 2; column-gap: 1.5rem; }
-@media (min-width: 768px) { .masonry-wrapper { column-count: 3; } }
+/* GRID SYSTEM (Mobile First) 
+   Forces 2 columns even on small screens 
+*/
+.grid-wrapper { 
+    display: grid;
+    grid-template-columns: repeat(2, 1fr); /* STRICT 2 COLUMNS */
+    gap: 10px;
+    padding-bottom: 50px;
+}
 
-/* PREMIUM CARD STYLING */
+/* Tablet/Desktop: 3 Columns */
+@media (min-width: 768px) { 
+    .grid-wrapper { grid-template-columns: repeat(3, 1fr); gap: 20px; } 
+}
+
+/* CARD STYLING */
 .insta-card {
-    break-inside: avoid;
-    margin-bottom: 1.5rem;
     background: #000;
-    border-radius: 16px; /* Smooth corners */
+    border-radius: 12px;
     position: relative;
     overflow: hidden;
     border: 1px solid #1f1f1f;
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    aspect-ratio: 4/5; /* Enforce Instagram Ratio */
+    transition: transform 0.2s ease;
 }
-.insta-card:hover { 
-    transform: translateY(-5px); 
-    border-color: #444; 
-    box-shadow: 0 12px 40px rgba(0,0,0,0.8);
+.insta-card:active { transform: scale(0.98); } /* Touch feedback */
+
+/* IMAGE FIT */
+.card-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
 }
 
-/* GLASSMORPHISM OVERLAY (The "Premium" Look) */
+/* GLASS OVERLAY */
 .glass-overlay {
     position: absolute;
     bottom: 0;
     width: 100%;
-    padding: 12px 16px;
-    background: rgba(0, 0, 0, 0.65); /* Dark semi-transparent */
-    backdrop-filter: blur(12px);      /* The Apple/Insta blur effect */
-    -webkit-backdrop-filter: blur(12px);
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     display: flex;
     justify-content: space-between;
     align-items: center;
 }
 
-/* ICON STYLING INSIDE HTML */
-.icon-row { display: flex; align-items: center; gap: 6px; }
-.stat-text { font-size: 0.85rem; font-weight: 600; color: #f0f0f0; letter-spacing: 0.5px; }
+.stat-text { font-size: 0.75rem; font-weight: 700; color: #fff; margin-left: 4px; }
+.icon-row { display: flex; align-items: center; }
 
-/* CHAT & COMMENTS */
+/* ROAST CHAT UI */
 .chat-bubble {
-    background: #111; border-left: 3px solid #e91e63; padding: 15px;
-    margin-bottom: 15px; border-radius: 4px; font-size: 0.95rem; line-height: 1.5; color: #eee;
+    background: #111; border-left: 3px solid #e91e63; padding: 12px;
+    margin-bottom: 12px; border-radius: 6px; font-size: 0.9rem; color: #eee;
 }
-.user-comment {
-    font-size: 0.9rem; margin-bottom: 8px; border-bottom: 1px solid #222; padding-bottom: 8px;
-}
-.user-handle { font-weight: 700; color: #aaa; font-size: 0.8rem; margin-right: 5px; }
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -94,7 +100,7 @@ a { text-decoration: none !important; }
 SCOPES = ['https://www.googleapis.com/auth/drive']
 FOLDER_ID = st.secrets["general"]["folder_id"]
 
-# --- IDENTITY SYSTEM ---
+# --- IDENTITY ---
 if "user_id" not in st.session_state:
     st.session_state.user_id = f"user_{str(uuid.uuid4())[:6]}"
     
@@ -103,36 +109,7 @@ def get_user_name():
     idx = int(st.session_state.user_id.split('_')[1], 16) % len(names)
     return names[idx]
 
-# --- AUDIO CORE (No Changes - Kept for context) ---
-class AudioCore:
-    @staticmethod
-    async def _gen_segment(text, rate, pitch, filename):
-        communicate = edge_tts.Communicate(text, "hi-IN-MadhurNeural", rate=rate, pitch=pitch)
-        await communicate.save(filename)
-        return filename
-
-    @staticmethod
-    async def produce_standup_audio(setup_text, punchline_text):
-        t_setup = f"setup_{uuid.uuid4()}.mp3"
-        t_punch = f"punch_{uuid.uuid4()}.mp3"
-        t_final = f"master_{uuid.uuid4()}.mp3"
-        await AudioCore._gen_segment(setup_text, "+15%", "+0Hz", t_setup)
-        await AudioCore._gen_segment(punchline_text, "-5%", "-2Hz", t_punch)
-        seg_setup = normalize(AudioSegment.from_mp3(t_setup))
-        seg_punch = normalize(AudioSegment.from_mp3(t_punch))
-        pause = AudioSegment.silent(duration=500)
-        final_mix = seg_setup + pause + seg_punch
-        final_mix.export(t_final, format="mp3")
-        os.remove(t_setup)
-        os.remove(t_punch)
-        return t_final
-
-def run_audio_production(setup, punchline):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    return loop.run_until_complete(AudioCore.produce_standup_audio(setup, punchline))
-
-# --- DATABASE (Persistence) ---
+# --- DATABASE ---
 class VibeDB:
     def __init__(self):
         self.creds = service_account.Credentials.from_service_account_info(
@@ -216,7 +193,7 @@ class VibeDB:
 
 if "db" not in st.session_state: st.session_state.db = VibeDB()
 
-# --- MEDIA PROCESSING ---
+# --- MEDIA & AUDIO ---
 @st.cache_data(ttl=3600)
 def get_image_bytes(file_id):
     service = st.session_state.db.service
@@ -227,18 +204,28 @@ def get_image_bytes(file_id):
     while not done: _, done = downloader.next_chunk()
     return file_obj.getvalue()
 
-def process_image(img_bytes):
-    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    target_ratio = 4/5
-    w, h = img.size
-    current_ratio = w/h
-    if current_ratio > target_ratio:
-        new_w = int(h * target_ratio)
-        img = img.crop(((w-new_w)//2, 0, (w-new_w)//2 + new_w, h))
-    else:
-        new_h = int(w / target_ratio)
-        img = img.crop((0, (h-new_h)//2, w, (h-new_h)//2 + new_h))
-    return img
+# (Using HEADLESS audio gen to avoid package crash)
+class AudioCore:
+    @staticmethod
+    async def _gen_segment(text, rate, pitch, filename):
+        communicate = edge_tts.Communicate(text, "hi-IN-MadhurNeural", rate=rate, pitch=pitch)
+        await communicate.save(filename)
+        return filename
+
+    @staticmethod
+    async def produce_standup_audio(setup_text, punchline_text):
+        t_setup = f"setup_{uuid.uuid4()}.mp3"
+        t_punch = f"punch_{uuid.uuid4()}.mp3"
+        t_final = f"master_{uuid.uuid4()}.mp3"
+        
+        # Simple generation to prevent ffmpeg panic if system libs missing
+        await AudioCore._gen_segment(setup_text + " ... " + punchline_text, "+0%", "+0Hz", t_final)
+        return t_final
+
+def run_audio_production(setup, punchline):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    return loop.run_until_complete(AudioCore.produce_standup_audio(setup, punchline))
 
 # --- AI LOGIC ---
 def stage_1_analyze(client, b64_img):
@@ -246,7 +233,7 @@ def stage_1_analyze(client, b64_img):
         completion = client.chat.completions.create(
             model="llama-3.2-11b-vision-preview",
             messages=[{"role": "user", "content": [
-                {"type": "text", "text": "Analyze for a roast. JSON: {visual_fact, roast_angle}"}, 
+                {"type": "text", "text": "Roast analysis JSON: {visual_fact, roast_angle}"}, 
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}
             ]}],
             response_format={"type": "json_object"}
@@ -255,7 +242,7 @@ def stage_1_analyze(client, b64_img):
     except: return {"visual_fact": "Selfie", "roast_angle": "Vanity"}
 
 def stage_2_write_comedy(client, context, style):
-    prompt = f"Style: {style}. Context: {context}. Write structured JSON roast: {{setup, punchline}}. Hinglish."
+    prompt = f"Style: {style}. Context: {context}. JSON: {{setup, punchline}}. Hinglish."
     completion = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
@@ -271,47 +258,37 @@ def render_roast_room():
     
     if not post: st.error("Post missing."); return
 
-    # Simple Header
     if st.button("← Back to Feed"):
         st.session_state.selected_post = None
         st.rerun()
 
-    col_img, col_interact = st.columns([1, 1], gap="medium")
-    with col_img:
-        img = process_image(get_image_bytes(post['file_id']))
-        st.image(img, use_container_width=True)
-        if st.button(f"❤️ Like ({post['likes']})", use_container_width=True):
-            st.session_state.db.toggle_like(pid)
+    img = Image.open(io.BytesIO(get_image_bytes(post['file_id'])))
+    st.image(img, use_container_width=True)
+
+    col1, col2 = st.columns([2, 1])
+    if col1.button(f"❤️ Like ({post['likes']})", use_container_width=True):
+        st.session_state.db.toggle_like(pid)
+        st.rerun()
+
+    st.markdown("### 💀 The Roast Room")
+    style = st.select_slider("Intensity", ["Mild", "Savage", "Nuclear"], value="Savage")
+    
+    if st.button("🎤 Drop a Roast", type="primary", use_container_width=True):
+        with st.spinner("Cooking..."):
+            client = Groq(api_key=st.secrets["groq"]["api_key"])
+            b64 = base64.b64encode(get_image_bytes(post['file_id'])).decode()
+            ctx = stage_1_analyze(client, b64)
+            joke = stage_2_write_comedy(client, ctx, style)
+            audio_path = run_audio_production(joke['setup'], joke['punchline'])
+            st.session_state.db.add_roast(pid, joke['setup'], joke['punchline'], style)
+            st.audio(audio_path, format="audio/mp3", autoplay=True)
             st.rerun()
 
-    with col_interact:
-        st.markdown("### 💀 The Roast Room")
-        style = st.select_slider("Intensity", ["Mild", "Savage", "Nuclear"], value="Savage")
-        if st.button("🎤 Drop a Roast", type="primary", use_container_width=True):
-            with st.spinner("Cooking..."):
-                client = Groq(api_key=st.secrets["groq"]["api_key"])
-                b64 = base64.b64encode(get_image_bytes(post['file_id'])).decode()
-                ctx = stage_1_analyze(client, b64)
-                joke = stage_2_write_comedy(client, ctx, style)
-                audio_path = run_audio_production(joke['setup'], joke['punchline'])
-                st.session_state.db.add_roast(pid, joke['setup'], joke['punchline'], style)
-                st.audio(audio_path, format="audio/mp3", autoplay=True)
-                st.rerun()
-
-        st.divider()
-        roasts = [st.session_state.db.data['roasts'][rid] for rid in post['roast_ids'] if rid in st.session_state.db.data['roasts']]
-        if roasts:
-            last = roasts[-1]
-            st.markdown(f"<div class='chat-bubble'><b>@SamayRaina_AI</b><br>{last['setup']}... <b>{last['punchline']}</b></div>", unsafe_allow_html=True)
-
-        st.markdown("#### 💬 Comments")
-        with st.form("c_form", clear_on_submit=True):
-            if st.form_submit_button("Post") and (txt := st.text_input("Comment")):
-                st.session_state.db.add_comment(pid, txt)
-                st.rerun()
-        
-        for c in reversed(post.get('comments', [])[-5:]):
-            st.markdown(f"<div class='user-comment'><b>{c['user_name']}</b>: {c['text']}</div>", unsafe_allow_html=True)
+    st.divider()
+    roasts = [st.session_state.db.data['roasts'][rid] for rid in post['roast_ids'] if rid in st.session_state.db.data['roasts']]
+    if roasts:
+        last = roasts[-1]
+        st.markdown(f"<div class='chat-bubble'><b>@SamayRaina_AI</b><br>{last['setup']}... <b>{last['punchline']}</b></div>", unsafe_allow_html=True)
 
 def render_feed():
     st.session_state.db.data = st.session_state.db._load()
@@ -320,29 +297,26 @@ def render_feed():
 
     if not post_list: st.info("Feed Empty."); return
 
-    html = ['<div class="masonry-wrapper">']
+    html = ['<div class="grid-wrapper">']
     for p in post_list:
         thumb = f"https://drive.google.com/thumbnail?id={p['file_id']}&sz=w400"
         
-        # --- PREMIUM HTML CARD ---
-        # Note: href='javascript:void(0);' prevents the reload loop
+        # --- FIXED CLICK CARD ---
+        # href='#' is standard. id is set.
+        # We rely on st_click_detector to catch the ID.
         card = f"""
         <div class="insta-card">
-            <a href='javascript:void(0);' id='{p['id']}' style="display:block; cursor:pointer;">
-                <div style="width:100%; padding-top:125%; position:relative; overflow:hidden; background:#101010;">
-                     <img src="{thumb}" style="position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover;">
-                     
-                     <div class="glass-overlay">
-                        <div class="icon-row">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
-                            <span class="stat-text">{p['likes']}</span>
-                        </div>
-                        
-                        <div class="icon-row">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
-                            <span class="stat-text">{len(p['roast_ids'])}</span>
-                        </div>
-                     </div>
+            <a href='#' id='{p['id']}' style="display:block; height:100%;">
+                <img src="{thumb}" class="card-img">
+                <div class="glass-overlay">
+                    <div class="icon-row">
+                        <span style="font-size:12px">❤️</span>
+                        <span class="stat-text">{p['likes']}</span>
+                    </div>
+                    <div class="icon-row">
+                        <span style="font-size:12px">💬</span>
+                        <span class="stat-text">{len(p['roast_ids'])}</span>
+                    </div>
                 </div>
             </a>
         </div>
@@ -350,11 +324,19 @@ def render_feed():
         html.append(card)
     html.append('</div>')
     
-    # CLICK DETECTOR
+    # DETECTOR
     clicked_id = click_detector("".join(html))
     
     if clicked_id:
         st.session_state.selected_post = clicked_id
+        st.rerun()
+
+# --- MAIN ---
+if st.session_state.selected_post:
+    render_roast_room()
+else:
+    st.markdown(f"### VibeGram 💀", unsafe_allow_html=True)
+    render_feed()
         st.rerun()
 
 # --- MAIN ---
