@@ -9,4 +9,4 @@ Pillow
 requests
 streamlit-autorefresh
 pydub
-pyaudioop
+
