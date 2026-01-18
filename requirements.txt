@@ -7,3 +7,4 @@ st-click-detector
 edge-tts
 Pillow
 requests
+streamlit-autorefresh
