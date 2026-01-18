@@ -26,7 +26,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- CSS ARCHITECTURE (FIXED FOR MOBILE) ---
+# --- CSS ARCHITECTURE (MOBILE OPTIMIZED) ---
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&display=swap');
@@ -36,17 +36,13 @@ st.markdown("""
 body { background-color: #000; color: #fff; font-family: 'Inter', sans-serif; }
 a { text-decoration: none !important; }
 
-/* GRID SYSTEM (Mobile First) 
-   Forces 2 columns even on small screens 
-*/
+/* GRID SYSTEM */
 .grid-wrapper { 
     display: grid;
-    grid-template-columns: repeat(2, 1fr); /* STRICT 2 COLUMNS */
+    grid-template-columns: repeat(2, 1fr); /* Force 2 columns */
     gap: 10px;
     padding-bottom: 50px;
 }
-
-/* Tablet/Desktop: 3 Columns */
 @media (min-width: 768px) { 
     .grid-wrapper { grid-template-columns: repeat(3, 1fr); gap: 20px; } 
 }
@@ -58,10 +54,10 @@ a { text-decoration: none !important; }
     position: relative;
     overflow: hidden;
     border: 1px solid #1f1f1f;
-    aspect-ratio: 4/5; /* Enforce Instagram Ratio */
+    aspect-ratio: 4/5;
     transition: transform 0.2s ease;
 }
-.insta-card:active { transform: scale(0.98); } /* Touch feedback */
+.insta-card:active { transform: scale(0.98); }
 
 /* IMAGE FIT */
 .card-img {
@@ -84,11 +80,10 @@ a { text-decoration: none !important; }
     justify-content: space-between;
     align-items: center;
 }
-
 .stat-text { font-size: 0.75rem; font-weight: 700; color: #fff; margin-left: 4px; }
 .icon-row { display: flex; align-items: center; }
 
-/* ROAST CHAT UI */
+/* CHAT UI */
 .chat-bubble {
     background: #111; border-left: 3px solid #e91e63; padding: 12px;
     margin-bottom: 12px; border-radius: 6px; font-size: 0.9rem; color: #eee;
@@ -170,13 +165,6 @@ class VibeDB:
         if changes: self.save()
         return self.data['posts']
 
-    def add_comment(self, post_id, text):
-        if post_id in self.data['posts']:
-            self.data['posts'][post_id]['comments'].append({
-                "user_name": get_user_name(), "text": text, "timestamp": str(datetime.now())
-            })
-            self.save()
-
     def toggle_like(self, post_id):
         if post_id in self.data['posts']:
             self.data['posts'][post_id]['likes'] += 1
@@ -191,6 +179,13 @@ class VibeDB:
         self.save()
         return rid
 
+    def add_comment(self, post_id, text):
+        if post_id in self.data['posts']:
+            self.data['posts'][post_id]['comments'].append({
+                "user_name": get_user_name(), "text": text, "timestamp": str(datetime.now())
+            })
+            self.save()
+
 if "db" not in st.session_state: st.session_state.db = VibeDB()
 
 # --- MEDIA & AUDIO ---
@@ -204,7 +199,6 @@ def get_image_bytes(file_id):
     while not done: _, done = downloader.next_chunk()
     return file_obj.getvalue()
 
-# (Using HEADLESS audio gen to avoid package crash)
 class AudioCore:
     @staticmethod
     async def _gen_segment(text, rate, pitch, filename):
@@ -214,11 +208,8 @@ class AudioCore:
 
     @staticmethod
     async def produce_standup_audio(setup_text, punchline_text):
-        t_setup = f"setup_{uuid.uuid4()}.mp3"
-        t_punch = f"punch_{uuid.uuid4()}.mp3"
         t_final = f"master_{uuid.uuid4()}.mp3"
-        
-        # Simple generation to prevent ffmpeg panic if system libs missing
+        # Using basic generation to avoid ffmpeg crashes on some envs
         await AudioCore._gen_segment(setup_text + " ... " + punchline_text, "+0%", "+0Hz", t_final)
         return t_final
 
@@ -256,7 +247,9 @@ def render_roast_room():
     st.session_state.db.data = st.session_state.db._load()
     post = st.session_state.db.data['posts'].get(pid)
     
-    if not post: st.error("Post missing."); return
+    if not post: 
+        st.error("Post missing.")
+        return
 
     if st.button("← Back to Feed"):
         st.session_state.selected_post = None
@@ -289,24 +282,33 @@ def render_roast_room():
     if roasts:
         last = roasts[-1]
         st.markdown(f"<div class='chat-bubble'><b>@SamayRaina_AI</b><br>{last['setup']}... <b>{last['punchline']}</b></div>", unsafe_allow_html=True)
+        
+    st.markdown("#### 💬 Comments")
+    with st.form("c_form", clear_on_submit=True):
+        if st.form_submit_button("Post") and (txt := st.text_input("Comment")):
+            st.session_state.db.add_comment(pid, txt)
+            st.rerun()
+
+    for c in reversed(post.get('comments', [])[-5:]):
+        st.markdown(f"<div style='font-size:0.9rem; margin-bottom:8px;'><b>{c['user_name']}</b>: {c['text']}</div>", unsafe_allow_html=True)
 
 def render_feed():
     st.session_state.db.data = st.session_state.db._load()
     posts = st.session_state.db.sync_drive_images()
     post_list = sorted([{"id": k, **v} for k,v in posts.items()], key=lambda x: x['likes'], reverse=True)
 
-    if not post_list: st.info("Feed Empty."); return
+    if not post_list: 
+        st.info("Feed Empty.")
+        return
 
     html = ['<div class="grid-wrapper">']
     for p in post_list:
         thumb = f"https://drive.google.com/thumbnail?id={p['file_id']}&sz=w400"
         
-        # --- FIXED CLICK CARD ---
-        # href='#' is standard. id is set.
-        # We rely on st_click_detector to catch the ID.
+        # NOTE: Using onclick to prevent default navigation which causes reloads
         card = f"""
         <div class="insta-card">
-            <a href='#' id='{p['id']}' style="display:block; height:100%;">
+            <a href='#' id='{p['id']}' onclick="event.preventDefault();" style="display:block; height:100%;">
                 <img src="{thumb}" class="card-img">
                 <div class="glass-overlay">
                     <div class="icon-row">
@@ -324,7 +326,6 @@ def render_feed():
         html.append(card)
     html.append('</div>')
     
-    # DETECTOR
     clicked_id = click_detector("".join(html))
     
     if clicked_id:
@@ -336,14 +337,4 @@ if st.session_state.selected_post:
     render_roast_room()
 else:
     st.markdown(f"### VibeGram 💀", unsafe_allow_html=True)
-    render_feed()
-        st.rerun()
-
-# --- MAIN ---
-if "selected_post" not in st.session_state: st.session_state.selected_post = None
-
-if st.session_state.selected_post:
-    render_roast_room()
-else:
-    st.markdown(f"## VibeGram 💀 <span style='font-size:0.8rem; color:#666'>@{get_user_name()}</span>", unsafe_allow_html=True)
     render_feed()
