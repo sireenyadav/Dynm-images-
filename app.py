@@ -70,10 +70,12 @@ body { background-color: #000; color: #fff; font-family: 'Inter', sans-serif; }
 # --- CONFIG & AUTH ---
 
 SCOPES = ['https://www.googleapis.com/auth/drive']
+# Ensure "folder_id" exists in your secrets.toml
 PARENT_FOLDER_ID = st.secrets["general"]["folder_id"]
 
 @st.cache_resource
 def get_drive_service():
+    # Ensure "gcp_service_account" exists in your secrets.toml
     creds = service_account.Credentials.from_service_account_info(
         st.secrets["gcp_service_account"], scopes=SCOPES
     )
@@ -150,15 +152,23 @@ def download_image_bytes(file_id):
         _, done = downloader.next_chunk()
     return file_obj.getvalue()
 
-# --- THE UTKARSH PIPELINE (AI LOGIC) ---
+# --- THE UTKARSH PIPELINE (EXTREME DYNAMIC AI) ---
 
 def stage_1_context_builder(client, base64_image):
     """
     The Silent Observer. Extracts signals using Llama 3.2 Vision.
+    Updated to look for FLAWS, not just objects.
     """
     prompt = """
-    Analyze this image for a roast comedian.
-    Describe the vibe, objects, pose, setting, and one specific "roastable point".
+    Analyze this image for a brutal roast. 
+    Ignore the "good" parts. Focus on the FLAWS.
+    
+    Look for:
+    - Bad fashion choices (cheap clothes, weird fits).
+    - Messy/Dirty background (peeling paint, unmade beds, trash).
+    - Cringe facial expressions or awkward poses.
+    - "Trying too hard" energy (fake candid, weird filters).
+    
     Return JSON format with keys: vibe, objects, pose, setting, roastable_point.  
     """  
     try:  
@@ -179,70 +189,89 @@ def stage_1_context_builder(client, base64_image):
         )  
         return json.loads(completion.choices[0].message.content)  
     except Exception as e:  
+        print(f"Vision Error: {e}")  
         return {"vibe": "generic", "roastable_point": "trying too hard"}
 
 def stage_2_dynamic_roast(client, context, level):
     """
-    The Roast Engine: Utkarsh AI (Extreme Sarcasm).
+    The Roast Engine: Utkarsh AI (Unfiltered, Human-Like, & Dynamic).
     """
-    # 5% Chance of specific "bored" refusal
-    if random.random() < 0.05:
-        return "Bhai rehne de, iski shakal dekh ke mera GPU depress ho gaya. Next."
-
-    # Escalation Logic
-    styles = {
-        1: "Mild judgment. Pointing out the obvious. 'Bhai kya kar raha hai?' vibe.",
-        2: "Personal attack. Compare them to cheap brands/items. Sarcastic praise.",
-        3: "ABSOLUTE VIOLATION. Question their existence. Street slang. Brutal honesty."
-    }
-
-    # SYSTEM: The Persona (Utkarsh)
-    system_prompt = """
-    You are 'Utkarsh', a brutal, deadpan Indian standup comedian.
     
-    CRITICAL INSTRUCTIONS:
-    1. LANGUAGE: Hinglish (Hindi + English). Use words like: "Bhai", "Matlab", "Scene", "Chomu", "Gareeb", "Bawasir", "Flex", "Chapri".
-    2. TONE: You are NOT angry. You are *bored* and *judgemental*. Like a disappointed senior roasting a junior.
-    3. CONTENT: Focus on their clothes, background, or 'fake aesthetic'.
-    4. NO FILLERS: Don't say "Oh look". Just start the insult.
-    5. LENGTH: Max 2 punchy sentences.
+    # 1. RANDOMIZED MOODS (The "Soul" of the roast)
+    # This ensures it never sounds the same twice.
+    moods = [
+        "The Toxic Ex: Bring up their past mistakes. Be manipulative and mean. Use words like 'Dhoka'.",
+        "The South Delhi Snob: Judge them for being 'cheap' or 'middle class'. Act superior.",
+        "The Desi Dad: Disappointed. Ask what they are doing with their life.",
+        "The Chapri King: Use extreme street slang (e.g., 'Bantai', 'Machayenge'). Be loud.",
+        "The Deadpan Killer: Say the meanest thing possible but calmly.",
+        "The Observational Comic: Point out one tiny, embarrassing detail in the background (e.g., the switchboard, the curtain)."
+    ]
     
-    EXAMPLES:
-    - "Bhai tune yeh shirt pehni hai ya shirt ne tujhe pehna hai?"
-    - "Isse acchi lighting toh mere fridge ke andar hai."
-    - "Confidence toh Ambani wala hai, par shakal..."
+    # 2. RANDOMIZED STRUCTURES (The "Format")
+    # Prevents the "Subject + Verb + Insult" pattern.
+    structures = [
+        "A direct rhetorical question (e.g., 'Kyun bhai?')",
+        "A brutal metaphor (e.g., 'You look like a wet biscuit...')",
+        "A short, one-word destruction.",
+        "A fake compliment that turns into a violation."
+    ]
+
+    current_mood = random.choice(moods)
+    current_structure = random.choice(structures)
+
+    # 3. THE "NO FILTER" SYSTEM PROMPT
+    system_prompt = f"""
+    You are Utkarsh, an underground Indian roast comedian who has NO FILTER.
+    
+    CURRENT PERSONA: {current_mood}
+    ROAST FORMAT: {current_structure}
+    
+    INSTRUCTIONS FOR EXTREME REALISM:
+    1. **REMOVE ALL SAFETY WHEELS**: Do not be polite. Do not hold back. If they look bad, say it.
+    2. **USE RAW SLANG**: Use words that friends use in private. (e.g., Bawasir, Tatti, Panauti, Nalla, Bhikari, Chindi).
+    3. **NO REPETITION**: Do NOT use the word "Chomu", "Overtry" or "Bhai" repeatedly. Those are banned. Find new insults.
+    4. **BE VULGAR IF NEEDED**: If the vibe is trash, call it trash. If they look thirsty, call them thirsty.
+    5. **HINGLISH ONLY**: Speak like a real Indian college student.
+    
+    Your goal is to make them regret uploading this photo.
     """
 
-    # USER: The Trigger
+    # 4. CONTEXT ANCHORING (Forcing specific observation)
     user_prompt = f"""
-    Roast this specific image context:
-    {json.dumps(context)}
+    Here is the victim:
+    - Vibe: {context.get('vibe')}
+    - Objects: {context.get('objects')}
+    - Weakness: {context.get('roastable_point')}
     
-    HEAT LEVEL: {level}/3 ({styles[level]})
+    HEAT LEVEL: {level}/3
     
-    TARGET: {context.get('roastable_point', 'their vibe')}
-    
-    Make it sound like a viral comment on a cringe Reel.
+    Write 1-2 punchy sentences. Destroy them based on the visual details above.
     """
 
     try:
+        # 5. DYNAMIC TEMPERATURE (Chaos Factor)
+        # Randomize between 0.85 and 1.1 for unpredictability.
+        chaos_temp = random.uniform(0.85, 1.1)
+        
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.85, 
+            temperature=chaos_temp, 
             max_tokens=150
         )
         return completion.choices[0].message.content
     except Exception as e:
-        return f"Server crash ho gaya teri photo dekh ke. (Error: {str(e)})"
+        return f"Bhai tera internet bhi tere jaisa slow hai. (Error: {str(e)})"
 
 async def stage_3_audio_chaos(text):
     """
     Adds stutters, pauses, and speed variations.
     """
+    # Insert Pause
     if "," in text: text = text.replace(",", " ... ")
 
     # Random Stutter  
@@ -254,7 +283,7 @@ async def stage_3_audio_chaos(text):
 
     # Variation  
     rate = random.choice(["+20%", "+25%", "+30%"])  
-    pitch = random.choice(["-2Hz", "+0Hz"])  
+    pitch = random.choice(["-2Hz", "+0Hz", "+2Hz"])  
 
     communicate = edge_tts.Communicate(text, "hi-IN-MadhurNeural", rate=rate, pitch=pitch)  
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:  
@@ -281,11 +310,12 @@ def generate_viral_card(img_bytes, roast_text):
         
         # Font Fallback
         try:
-            font = ImageFont.truetype("arial.ttf", 40)
+            # Matches standard Linux/Streamlit paths or basic fallback
+            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 40)
         except:
             font = ImageFont.load_default()
 
-        # Word wrap logic  
+        # Simple word wrap logic  
         margin = 40  
         offset = img.height // 2  
         for line in textwrap.wrap(roast_text, width=25):  
@@ -325,7 +355,7 @@ def open_roast_room(file_id, file_name):
     col_vis, col_int = st.columns([1.2, 1], gap="medium")  
 
     with col_vis:  
-        with st.spinner("Analyzing visuals..."):  
+        with st.spinner("Scanning for cringe..."):  
             img_bytes = download_image_bytes(file_id)  
             st.image(img_bytes, use_container_width=True)  
 
@@ -410,12 +440,13 @@ def open_roast_room(file_id, file_name):
 def render_feed(files):
     html = ['<div class="masonry-wrapper">']
     for f in files:
+        # Use simple string replacement for thumbnail size if using standard Google drive thumbnails
         thumb = f.get('thumbnailLink', '').replace('=s220', '=s800')
         votes = st.session_state.db["votes"].get(f['id'], 0)
 
         # Calculate Trending  
         is_trending = False  
-        if votes > 5: is_trending = True 
+        if votes > 5: is_trending = True # Simple threshold for demo logic  
 
         badge = '<div class="live-badge" style="position:absolute; top:10px; right:10px;">🔥 TRENDING</div>' if is_trending else ''  
 
@@ -464,7 +495,7 @@ try:
                 st.session_state.current_level = 1  
                 st.session_state.roast_text = None  
                 st.session_state.audio_path = None  
-                st.session_state.visual_context.pop(clicked_id, None) 
+                st.session_state.visual_context.pop(clicked_id, None) # Clear context to force re-analysis if needed  
 
             target = next((f for f in files if f['id'] == clicked_id), None)  
             if target:   
