@@ -93,8 +93,8 @@ def load_db():
             while not done: 
                 _, done = downloader.next_chunk()
             return json.loads(file_obj.getvalue().decode('utf-8'))
-    except Exception as e:
-        print(f"DB Load Error: {e}")
+    except Exception:
+        pass
     # Default Structure
     return {"votes": {}, "comments": {}, "roast_history": {}}
 
@@ -110,8 +110,8 @@ def save_db(db):
             service.files().update(fileId=files[0]['id'], media_body=media).execute()
         else: 
             service.files().create(body={'name': 'vibegram_db.json', 'parents': [PARENT_FOLDER_ID]}, media_body=media).execute()
-    except Exception as e:
-        print(f"DB Save Error: {e}")
+    except Exception:
+        pass
 
 # --- STATE MANAGEMENT ---
 if "db" not in st.session_state: st.session_state.db = load_db()
@@ -138,36 +138,42 @@ def download_image_bytes(file_id):
         _, done = downloader.next_chunk()
     return file_obj.getvalue()
 
-# --- THE PREDATOR PIPELINE ---
+# --- THE PREDATOR PIPELINE (AI LOGIC) ---
 
 def stage_1_context_builder(client, base64_image):
     """
-    The Silent Observer. Extracts signals, doesn't roast.
+    The Silent Observer. Extracts signals using Llama 3.2 Vision.
     """
     prompt = """
-    Analyze this image for a roast comedian.
-    OUTPUT JSON ONLY:
-    {
-    "vibe": "tryhard/rich kid/struggling/messy",
-    "objects": ["dirty mirror", "fake watch", "weird poster"],
-    "pose": "awkward/confident/forced",
-    "setting": "bathroom/gym/mom's basement",
-    "roastable_point": "The specific thing most embarrassing about this image"
-    }
+    Analyze this image for a roast comedian. 
+    Describe the vibe, objects, pose, setting, and one specific "roastable point".
+    
+    Return JSON format with keys: vibe, objects, pose, setting, roastable_point.
     """
     try:
         completion = client.chat.completions.create(
-            model="llama-3.2-90b-vision-preview", # Updated model name for Groq vision usually
-            messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}]}],
-            temperature=0.5, max_tokens=200, response_format={"type": "json_object"}
+            model="llama-3.2-90b-vision-preview", # LATEST VISION MODEL
+            messages=[
+                {
+                    "role": "user", 
+                    "content": [
+                        {"type": "text", "text": prompt}, 
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    ]
+                }
+            ],
+            temperature=0.5, 
+            max_tokens=300, 
+            response_format={"type": "json_object"}
         )
         return json.loads(completion.choices[0].message.content)
-    except:
-        return {"vibe": "generic", "roastable_point": "existence"}
+    except Exception as e:
+        print(f"Vision Error: {e}")
+        return {"vibe": "generic", "roastable_point": "trying too hard"}
 
 def stage_2_dynamic_roast(client, context, level):
     """
-    The Roast Engine.
+    The Roast Engine using Llama 3.3.
     """
     # 5% Chance of Refusal (Unpredictability)
     if random.random() < 0.05:
@@ -180,27 +186,38 @@ def stage_2_dynamic_roast(client, context, level):
         3: "NUCLEAR. Question their life choices. Brutal."
     }
 
-    prompt = f"""
-    You are Samay Raina.
-    CONTEXT: {json.dumps(context)}
-    HEAT LEVEL: {level}/3 ({styles[level]})
-
-    RULES:
-    1. HINGLISH ONLY. (Hindi in English script).
-    2. Use slang: "Bhai", "Matlab", "Gajab", "Khatam".
-    3. No "Hello". Start attacking.
-    4. Make it sound like a live stream comment.
-    5. Mention the '{context.get('roastable_point')}' specifically.
-    6. Max 2 short sentences.
+    # SYSTEM: The Persona
+    system_prompt = """
+    You are Samay Raina (Indian Standup Comedian).
+    1. HINGLISH ONLY (Hindi words in English script).
+    2. Use slang: "Bhai", "Matlab", "Gajab", "Khatam", "Chomu".
+    3. No "Hello" or pleasantries. Start attacking immediately.
+    4. Make it sound like a live stream chat comment.
+    5. Max 2 short sentences.
     """
 
-    completion = client.chat.completions.create(
-        model="llama3-70b-8192", # Standard Groq text model
-        messages=[{"role": "system", "content": prompt}],
-        temperature=0.8 + (level * 0.1), max_tokens=150
-    )
+    # USER: The Trigger
+    user_prompt = f"""
+    Roast this person based on these details:
+    CONTEXT: {json.dumps(context)}
+    HEAT LEVEL: {level}/3 ({styles[level]})
+    
+    Specifically mention the '{context.get('roastable_point')}' to make it personal.
+    """
 
-    return completion.choices[0].message.content
+    try:
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile", # LATEST TEXT MODEL
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.8 + (level * 0.1), 
+            max_tokens=150
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        return f"Arre server crash ho gaya teri photo dekh ke. (Error: {str(e)})"
 
 async def stage_3_audio_chaos(text):
     """
