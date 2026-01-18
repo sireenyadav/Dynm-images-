@@ -5,3 +5,5 @@ google-auth-oauthlib
 groq
 st-click-detector
 edge-tts
+Pillow
+requests
