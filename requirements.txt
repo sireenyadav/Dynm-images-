@@ -8,3 +8,4 @@ edge-tts
 Pillow
 requests
 streamlit-autorefresh
+pydub
