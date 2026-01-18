@@ -17,7 +17,7 @@ import requests
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="GaliGram 🤬", layout="wide", page_icon="🖕")
+st.set_page_config(page_title="Class 12vi Instagram", layout="wide", page_icon="🥀")
 
 # --- DARK & GRITTY CSS ---
 st.markdown("""
@@ -203,8 +203,8 @@ def stage_2_toxic_roast(client, context, level):
     # 2. ESCALATION (The "Heat")
     levels = {
         1: "Insulting. Call them 'Nalla', 'Chindi', 'Bhikari'.",
-        2: "Abusive. Use standard Gaalis 'Ch**iya', 'Kutta', 'Saala'.",
-        3: "NUCLEAR FILTH. Use 'Madarch**d', 'Behench**d', 'Randi', 'Bhadwa'. No limits."
+        2: "Abusive. Use standard Gaalis 'Chutiya', 'Kutta', 'Saala', 'Bhosda', 'raand'.",
+        3: "NUCLEAR FILTH. Use 'Madarchod', 'Behenchod', 'Randi', 'Bhadwa', 'maa ka lauda'. No limits."
     }
 
     current_mood = random.choice(moods)
@@ -219,7 +219,7 @@ def stage_2_toxic_roast(client, context, level):
     RULES:
     1. **USE HEAVY HINDI GAALIS**: Do not censor yourself. If level is 3, go full darkness.
     2. **ATTACK**: Attack their face, their money, their background.
-    3. **SLANG**: Use words like: BKL, MKC, Bwoy, Chhapri, Bawasir.
+    3. **SLANG**: Use words like: Behen ke lode, Maa ki Chut, Bwoy, Chhapri, Bawasir.
     4. **NO MERCY**: Make them cry.
     5. **HINGLISH**: Speak like a toxic Indian guy on voice chat.
     
@@ -370,7 +370,7 @@ def open_roast_room(file_id, file_name):
                     st.session_state.visual_context[file_id] = ctx  
 
             # Stage 2: Roast  
-            with st.spinner("Writing slurs..."):  
+            with st.spinner("Bhosdu Writing slurs..."):  
                 time.sleep(0.5) 
                 roast = stage_2_toxic_roast(client, st.session_state.visual_context[file_id], lvl)  
                 st.session_state.roast_text = roast  
